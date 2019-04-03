@@ -11,8 +11,15 @@ import type {Fiber} from 'react-reconciler/src/ReactFiber';
 import type {FiberRoot} from 'react-reconciler/src/ReactFiberRoot';
 import type {Instance, TextInstance} from './ReactTestHostConfig';
 
-import * as TestRenderer from 'react-reconciler/inline.test';
-import {batchedUpdates} from 'events/ReactGenericBatching';
+import * as Scheduler from 'scheduler/unstable_mock';
+import {
+  getPublicRootInstance,
+  createContainer,
+  updateContainer,
+  flushSync,
+  injectIntoDevTools,
+  batchedUpdates,
+} from 'react-reconciler/inline.test';
 import {findCurrentFiberUsingSlowPath} from 'react-reconciler/reflection';
 import {
   Fragment,
@@ -33,9 +40,9 @@ import {
 } from 'shared/ReactWorkTags';
 import invariant from 'shared/invariant';
 import ReactVersion from 'shared/ReactVersion';
+import act from './ReactTestRendererAct';
 
-import * as ReactTestHostConfig from './ReactTestHostConfig';
-import * as TestRendererScheduling from './ReactTestRendererScheduling';
+import {getPublicInstance} from './ReactTestHostConfig';
 
 type TestRendererOptions = {
   createNodeMock: (element: React$Element<any>) => any,
@@ -277,7 +284,7 @@ class ReactTestInstance {
 
   get instance() {
     if (this._fiber.tag === HostComponent) {
-      return ReactTestHostConfig.getPublicInstance(this._fiber.stateNode);
+      return getPublicInstance(this._fiber.stateNode);
     } else {
       return this._fiber.stateNode;
     }
@@ -412,6 +419,8 @@ function propsMatch(props: Object, filter: Object): boolean {
 }
 
 const ReactTestRendererFiber = {
+  _Scheduler: Scheduler,
+
   create(element: React$Element<any>, options: TestRendererOptions) {
     let createNodeMock = defaultTestOptions.createNodeMock;
     let isConcurrent = false;
@@ -428,15 +437,17 @@ const ReactTestRendererFiber = {
       createNodeMock,
       tag: 'CONTAINER',
     };
-    let root: FiberRoot | null = TestRenderer.createContainer(
+    let root: FiberRoot | null = createContainer(
       container,
       isConcurrent,
       false,
     );
     invariant(root != null, 'something went wrong');
-    TestRenderer.updateContainer(element, root, null, null);
+    updateContainer(element, root, null, null);
 
     const entry = {
+      _Scheduler: Scheduler,
+
       root: undefined, // makes flow happy
       // we define a 'getter' for 'root' below using 'Object.defineProperty'
       toJSON(): Array<ReactTestRendererNode> | ReactTestRendererNode | null {
@@ -449,7 +460,15 @@ const ReactTestRendererFiber = {
         if (container.children.length === 1) {
           return toJSON(container.children[0]);
         }
-
+        if (
+          container.children.length === 2 &&
+          container.children[0].isHidden === true &&
+          container.children[1].isHidden === false
+        ) {
+          // Omit timed out children from output entirely, including the fact that we
+          // temporarily wrap fallback and timed out children in an array.
+          return toJSON(container.children[1]);
+        }
         let renderedChildren = null;
         if (container.children && container.children.length) {
           for (let i = 0; i < container.children.length; i++) {
@@ -475,13 +494,13 @@ const ReactTestRendererFiber = {
         if (root == null || root.current == null) {
           return;
         }
-        TestRenderer.updateContainer(newElement, root, null, null);
+        updateContainer(newElement, root, null, null);
       },
       unmount() {
         if (root == null || root.current == null) {
           return;
         }
-        TestRenderer.updateContainer(null, root, null, null);
+        updateContainer(null, root, null, null);
         container = null;
         root = null;
       },
@@ -489,16 +508,12 @@ const ReactTestRendererFiber = {
         if (root == null || root.current == null) {
           return null;
         }
-        return TestRenderer.getPublicRootInstance(root);
+        return getPublicRootInstance(root);
       },
 
-      unstable_flushAll: TestRendererScheduling.flushAll,
       unstable_flushSync<T>(fn: () => T): T {
-        TestRendererScheduling.clearYields();
-        return TestRenderer.flushSync(fn);
+        return flushSync(fn);
       },
-      unstable_flushNumberOfYields: TestRendererScheduling.flushNumberOfYields,
-      unstable_clearYields: TestRendererScheduling.clearYields,
     };
 
     Object.defineProperty(
@@ -529,14 +544,10 @@ const ReactTestRendererFiber = {
     return entry;
   },
 
-  unstable_yield: TestRendererScheduling.yieldValue,
-  unstable_clearYields: TestRendererScheduling.clearYields,
-
-  /* eslint-disable camelcase */
+  /* eslint-disable-next-line camelcase */
   unstable_batchedUpdates: batchedUpdates,
-  /* eslint-enable camelcase */
 
-  unstable_setNowImplementation: TestRendererScheduling.setNowImplementation,
+  act,
 };
 
 const fiberToWrapper = new WeakMap();
@@ -553,7 +564,7 @@ function wrapFiber(fiber: Fiber): ReactTestInstance {
 }
 
 // Enable ReactTestRenderer to be used to test DevTools integration.
-TestRenderer.injectIntoDevTools({
+injectIntoDevTools({
   findFiberByHostInstance: (() => {
     throw new Error('TestRenderer does not support findFiberByHostInstance()');
   }: any),

@@ -13,7 +13,7 @@
 let React;
 let ReactDOMServer;
 let PropTypes;
-let ReactCurrentOwner;
+let ReactCurrentDispatcher;
 
 function normalizeCodeLocInfo(str) {
   return str && str.replace(/\(at .+?:\d+\)/g, '(at **)');
@@ -25,9 +25,9 @@ describe('ReactDOMServer', () => {
     React = require('react');
     PropTypes = require('prop-types');
     ReactDOMServer = require('react-dom/server');
-    ReactCurrentOwner =
+    ReactCurrentDispatcher =
       React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
-        .ReactCurrentOwner;
+        .ReactCurrentDispatcher;
   });
 
   describe('renderToString', () => {
@@ -439,7 +439,7 @@ describe('ReactDOMServer', () => {
       const Context = React.createContext(0);
 
       function readContext(context) {
-        return ReactCurrentOwner.currentDispatcher.readContext(context);
+        return ReactCurrentDispatcher.current.readContext(context);
       }
 
       function Consumer(props) {
@@ -553,6 +553,52 @@ describe('ReactDOMServer', () => {
           </div>,
         ),
       ).not.toThrow();
+    });
+  });
+
+  describe('renderToNodeStream', () => {
+    it('should generate simple markup', () => {
+      const SuccessfulElement = React.createElement(() => <img />);
+      const response = ReactDOMServer.renderToNodeStream(SuccessfulElement);
+      expect(response.read().toString()).toMatch(
+        new RegExp('<img data-reactroot=""' + '/>'),
+      );
+    });
+
+    it('should handle errors correctly', () => {
+      const FailingElement = React.createElement(() => {
+        throw new Error('An Error');
+      });
+      const response = ReactDOMServer.renderToNodeStream(FailingElement);
+      return new Promise(resolve => {
+        response.once('error', () => {
+          resolve();
+        });
+        expect(response.read()).toBeNull();
+      });
+    });
+  });
+
+  describe('renderToStaticNodeStream', () => {
+    it('should generate simple markup', () => {
+      const SuccessfulElement = React.createElement(() => <img />);
+      const response = ReactDOMServer.renderToStaticNodeStream(
+        SuccessfulElement,
+      );
+      expect(response.read().toString()).toMatch(new RegExp('<img' + '/>'));
+    });
+
+    it('should handle errors correctly', () => {
+      const FailingElement = React.createElement(() => {
+        throw new Error('An Error');
+      });
+      const response = ReactDOMServer.renderToStaticNodeStream(FailingElement);
+      return new Promise(resolve => {
+        response.once('error', () => {
+          resolve();
+        });
+        expect(response.read()).toBeNull();
+      });
     });
   });
 
@@ -857,5 +903,126 @@ describe('ReactDOMServer', () => {
         '    in div (at **)\n' +
         '    in App (at **)',
     ]);
+  });
+
+  it('should warn if an invalid contextType is defined', () => {
+    const Context = React.createContext();
+
+    class ComponentA extends React.Component {
+      // It should warn for both Context.Consumer and Context.Provider
+      static contextType = Context.Consumer;
+      render() {
+        return <div />;
+      }
+    }
+    class ComponentB extends React.Component {
+      static contextType = Context.Provider;
+      render() {
+        return <div />;
+      }
+    }
+
+    expect(() => {
+      ReactDOMServer.renderToString(<ComponentA />);
+    }).toWarnDev(
+      'Warning: ComponentA defines an invalid contextType. ' +
+        'contextType should point to the Context object returned by React.createContext(). ' +
+        'Did you accidentally pass the Context.Consumer instead?',
+      {withoutStack: true},
+    );
+
+    // Warnings should be deduped by component type
+    ReactDOMServer.renderToString(<ComponentA />);
+
+    expect(() => {
+      ReactDOMServer.renderToString(<ComponentB />);
+    }).toWarnDev(
+      'Warning: ComponentB defines an invalid contextType. ' +
+        'contextType should point to the Context object returned by React.createContext(). ' +
+        'Did you accidentally pass the Context.Provider instead?',
+      {withoutStack: true},
+    );
+  });
+
+  it('should not warn when class contextType is null', () => {
+    class Foo extends React.Component {
+      static contextType = null; // Handy for conditional declaration
+      render() {
+        return this.context.hello.world;
+      }
+    }
+
+    expect(() => {
+      ReactDOMServer.renderToString(<Foo />);
+    }).toThrow("Cannot read property 'world' of undefined");
+  });
+
+  it('should warn when class contextType is undefined', () => {
+    class Foo extends React.Component {
+      // This commonly happens with circular deps
+      // https://github.com/facebook/react/issues/13969
+      static contextType = undefined;
+      render() {
+        return this.context.hello.world;
+      }
+    }
+
+    expect(() => {
+      expect(() => {
+        ReactDOMServer.renderToString(<Foo />);
+      }).toThrow("Cannot read property 'world' of undefined");
+    }).toWarnDev(
+      'Foo defines an invalid contextType. ' +
+        'contextType should point to the Context object returned by React.createContext(). ' +
+        'However, it is set to undefined. ' +
+        'This can be caused by a typo or by mixing up named and default imports. ' +
+        'This can also happen due to a circular dependency, ' +
+        'so try moving the createContext() call to a separate file.',
+      {withoutStack: true},
+    );
+  });
+
+  it('should warn when class contextType is an object', () => {
+    class Foo extends React.Component {
+      // Can happen due to a typo
+      static contextType = {
+        x: 42,
+        y: 'hello',
+      };
+      render() {
+        return this.context.hello.world;
+      }
+    }
+
+    expect(() => {
+      expect(() => {
+        ReactDOMServer.renderToString(<Foo />);
+      }).toThrow("Cannot read property 'hello' of undefined");
+    }).toWarnDev(
+      'Foo defines an invalid contextType. ' +
+        'contextType should point to the Context object returned by React.createContext(). ' +
+        'However, it is set to an object with keys {x, y}.',
+      {withoutStack: true},
+    );
+  });
+
+  it('should warn when class contextType is a primitive', () => {
+    class Foo extends React.Component {
+      static contextType = 'foo';
+      render() {
+        return this.context.hello.world;
+      }
+    }
+
+    expect(() => {
+      expect(() => {
+        ReactDOMServer.renderToString(<Foo />);
+      }).toThrow("Cannot read property 'world' of undefined");
+    }).toWarnDev(
+      'Foo defines an invalid contextType. ' +
+        'contextType should point to the Context object returned by React.createContext(). ' +
+        'However, it is set to a string.',
+      {withoutStack: true},
+    );
   });
 });

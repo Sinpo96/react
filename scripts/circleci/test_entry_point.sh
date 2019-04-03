@@ -11,10 +11,11 @@ if [ $((0 % CIRCLE_NODE_TOTAL)) -eq "$CIRCLE_NODE_INDEX" ]; then
   COMMANDS_TO_RUN+=('node ./scripts/tasks/flow-ci')
   COMMANDS_TO_RUN+=('node ./scripts/tasks/eslint')
   COMMANDS_TO_RUN+=('yarn test --maxWorkers=2')
+  COMMANDS_TO_RUN+=('yarn test-new-scheduler --maxWorkers=2')
+  COMMANDS_TO_RUN+=('yarn test-persistent --maxWorkers=2')
   COMMANDS_TO_RUN+=('./scripts/circleci/check_license.sh')
   COMMANDS_TO_RUN+=('./scripts/circleci/check_modules.sh')
   COMMANDS_TO_RUN+=('./scripts/circleci/test_print_warnings.sh')
-  COMMANDS_TO_RUN+=('./scripts/circleci/track_stats.sh')
 fi
 
 if [ $((1 % CIRCLE_NODE_TOTAL)) -eq "$CIRCLE_NODE_INDEX" ]; then
@@ -25,6 +26,8 @@ if [ $((1 % CIRCLE_NODE_TOTAL)) -eq "$CIRCLE_NODE_INDEX" ]; then
 fi
 
 if [ $((2 % CIRCLE_NODE_TOTAL)) -eq "$CIRCLE_NODE_INDEX" ]; then
+  COMMANDS_TO_RUN+=('./scripts/circleci/add_build_info_json.sh')
+  COMMANDS_TO_RUN+=('./scripts/circleci/update_package_versions.sh')
   COMMANDS_TO_RUN+=('./scripts/circleci/build.sh')
   COMMANDS_TO_RUN+=('yarn test-build --maxWorkers=2')
   COMMANDS_TO_RUN+=('yarn test-build-prod --maxWorkers=2')

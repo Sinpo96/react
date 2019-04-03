@@ -22,11 +22,12 @@ import {
   findCurrentHostFiber,
   findCurrentHostFiberWithNoPortals,
 } from 'react-reconciler/reflection';
-import * as ReactInstanceMap from 'shared/ReactInstanceMap';
+import {get as getInstance} from 'shared/ReactInstanceMap';
 import {HostComponent, ClassComponent} from 'shared/ReactWorkTags';
 import getComponentName from 'shared/getComponentName';
 import invariant from 'shared/invariant';
 import warningWithoutStack from 'shared/warningWithoutStack';
+import ReactSharedInternals from 'shared/ReactSharedInternals';
 
 import {getPublicInstance} from './ReactFiberHostConfig';
 import {
@@ -36,13 +37,12 @@ import {
   isContextProvider as isLegacyContextProvider,
 } from './ReactFiberContext';
 import {createFiberRoot} from './ReactFiberRoot';
-import * as ReactFiberDevToolsHook from './ReactFiberDevToolsHook';
+import {injectInternals} from './ReactFiberDevToolsHook';
 import {
   computeUniqueAsyncExpiration,
   requestCurrentTime,
   computeExpirationForFiber,
   scheduleWork,
-  requestWork,
   flushRoot,
   batchedUpdates,
   unbatchedUpdates,
@@ -56,9 +56,13 @@ import {
 } from './ReactFiberScheduler';
 import {createUpdate, enqueueUpdate} from './ReactUpdateQueue';
 import ReactFiberInstrumentation from './ReactFiberInstrumentation';
-import * as ReactCurrentFiber from './ReactCurrentFiber';
-import {getStackByFiberInDevAndProd} from './ReactCurrentFiber';
+import {
+  getStackByFiberInDevAndProd,
+  phase as ReactCurrentFiberPhase,
+  current as ReactCurrentFiberCurrent,
+} from './ReactCurrentFiber';
 import {StrictMode} from './ReactTypeOfMode';
+import {Sync} from './ReactFiberExpirationTime';
 
 type OpaqueRoot = FiberRoot;
 
@@ -94,7 +98,7 @@ function getContextForSubtree(
     return emptyContextObject;
   }
 
-  const fiber = ReactInstanceMap.get(parentComponent);
+  const fiber = getInstance(parentComponent);
   const parentContext = findCurrentUnmaskedContext(fiber);
 
   if (fiber.tag === ClassComponent) {
@@ -115,8 +119,8 @@ function scheduleRootUpdate(
 ) {
   if (__DEV__) {
     if (
-      ReactCurrentFiber.phase === 'render' &&
-      ReactCurrentFiber.current !== null &&
+      ReactCurrentFiberPhase === 'render' &&
+      ReactCurrentFiberCurrent !== null &&
       !didWarnAboutNestedUpdates
     ) {
       didWarnAboutNestedUpdates = true;
@@ -126,7 +130,7 @@ function scheduleRootUpdate(
           'triggering nested component updates from render is not allowed. ' +
           'If necessary, trigger nested updates in componentDidUpdate.\n\n' +
           'Check the render method of %s.',
-        getComponentName(ReactCurrentFiber.current.type) || 'Unknown',
+        getComponentName(ReactCurrentFiberCurrent.type) || 'Unknown',
       );
     }
   }
@@ -187,7 +191,7 @@ export function updateContainerAtExpirationTime(
 }
 
 function findHostInstance(component: Object): PublicInstance | null {
-  const fiber = ReactInstanceMap.get(component);
+  const fiber = getInstance(component);
   if (fiber === undefined) {
     if (typeof component.render === 'function') {
       invariant(false, 'Unable to find node on an unmounted component.');
@@ -211,7 +215,7 @@ function findHostInstanceWithWarning(
   methodName: string,
 ): PublicInstance | null {
   if (__DEV__) {
-    const fiber = ReactInstanceMap.get(component);
+    const fiber = getInstance(component);
     if (fiber === undefined) {
       if (typeof component.render === 'function') {
         invariant(false, 'Unable to find node on an unmounted component.');
@@ -295,7 +299,6 @@ export function updateContainer(
 
 export {
   flushRoot,
-  requestWork,
   computeUniqueAsyncExpiration,
   batchedUpdates,
   unbatchedUpdates,
@@ -305,6 +308,7 @@ export {
   flushInteractiveUpdates,
   flushControlled,
   flushSync,
+  flushPassiveEffects,
 };
 
 export function getPublicRootInstance(
@@ -336,10 +340,86 @@ export function findHostInstanceWithNoPortals(
   return hostFiber.stateNode;
 }
 
+let overrideHookState = null;
+let overrideProps = null;
+
+if (__DEV__) {
+  const copyWithSetImpl = (
+    obj: Object | Array<any>,
+    path: Array<string | number>,
+    idx: number,
+    value: any,
+  ) => {
+    if (idx >= path.length) {
+      return value;
+    }
+    const key = path[idx];
+    const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+    // $FlowFixMe number or string is fine here
+    updated[key] = copyWithSetImpl(obj[key], path, idx + 1, value);
+    return updated;
+  };
+
+  const copyWithSet = (
+    obj: Object | Array<any>,
+    path: Array<string | number>,
+    value: any,
+  ): Object | Array<any> => {
+    return copyWithSetImpl(obj, path, 0, value);
+  };
+
+  // Support DevTools editable values for useState and useReducer.
+  overrideHookState = (
+    fiber: Fiber,
+    id: number,
+    path: Array<string | number>,
+    value: any,
+  ) => {
+    // For now, the "id" of stateful hooks is just the stateful hook index.
+    // This may change in the future with e.g. nested hooks.
+    let currentHook = fiber.memoizedState;
+    while (currentHook !== null && id > 0) {
+      currentHook = currentHook.next;
+      id--;
+    }
+    if (currentHook !== null) {
+      flushPassiveEffects();
+
+      const newState = copyWithSet(currentHook.memoizedState, path, value);
+      currentHook.memoizedState = newState;
+      currentHook.baseState = newState;
+
+      // We aren't actually adding an update to the queue,
+      // because there is no update we can add for useReducer hooks that won't trigger an error.
+      // (There's no appropriate action type for DevTools overrides.)
+      // As a result though, React will see the scheduled update as a noop and bailout.
+      // Shallow cloning props works as a workaround for now to bypass the bailout check.
+      fiber.memoizedProps = {...fiber.memoizedProps};
+
+      scheduleWork(fiber, Sync);
+    }
+  };
+
+  // Support DevTools props for function components, forwardRef, memo, host components, etc.
+  overrideProps = (fiber: Fiber, path: Array<string | number>, value: any) => {
+    flushPassiveEffects();
+    fiber.pendingProps = copyWithSet(fiber.memoizedProps, path, value);
+    if (fiber.alternate) {
+      fiber.alternate.pendingProps = fiber.pendingProps;
+    }
+    scheduleWork(fiber, Sync);
+  };
+}
+
 export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
   const {findFiberByHostInstance} = devToolsConfig;
-  return ReactFiberDevToolsHook.injectInternals({
+  const {ReactCurrentDispatcher} = ReactSharedInternals;
+
+  return injectInternals({
     ...devToolsConfig,
+    overrideHookState,
+    overrideProps,
+    currentDispatcherRef: ReactCurrentDispatcher,
     findHostInstanceByFiber(fiber: Fiber): Instance | TextInstance | null {
       const hostFiber = findCurrentHostFiber(fiber);
       if (hostFiber === null) {

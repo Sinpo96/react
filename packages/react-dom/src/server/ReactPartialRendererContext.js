@@ -10,18 +10,18 @@
 import type {ThreadID} from './ReactThreadIDAllocator';
 import type {ReactContext} from 'shared/ReactTypes';
 
-import {REACT_CONTEXT_TYPE} from 'shared/ReactSymbols';
+import {REACT_CONTEXT_TYPE, REACT_PROVIDER_TYPE} from 'shared/ReactSymbols';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import getComponentName from 'shared/getComponentName';
 import warningWithoutStack from 'shared/warningWithoutStack';
 import checkPropTypes from 'prop-types/checkPropTypes';
 
 let ReactDebugCurrentFrame;
+let didWarnAboutInvalidateContextType;
 if (__DEV__) {
   ReactDebugCurrentFrame = ReactSharedInternals.ReactDebugCurrentFrame;
+  didWarnAboutInvalidateContextType = new Set();
 }
-
-const didWarnAboutInvalidateContextType = {};
 
 export const emptyObject = {};
 if (__DEV__) {
@@ -59,7 +59,8 @@ export function validateContextBounds(
   // If we don't have enough slots in this context to store this threadID,
   // fill it in without leaving any holes to ensure that the VM optimizes
   // this as non-holey index properties.
-  for (let i = context._threadCount; i <= threadID; i++) {
+  // (Note: If `react` package is < 16.6, _threadCount is undefined.)
+  for (let i = context._threadCount | 0; i <= threadID; i++) {
     // We assume that this is the same as the defaultValue which might not be
     // true if we're rendering inside a secondary renderer but they are
     // secondary because these use cases are very rare.
@@ -74,22 +75,49 @@ export function processContext(
   threadID: ThreadID,
 ) {
   const contextType = type.contextType;
-  if (typeof contextType === 'object' && contextType !== null) {
-    if (__DEV__) {
-      if (contextType.$$typeof !== REACT_CONTEXT_TYPE) {
-        let name = getComponentName(type) || 'Component';
-        if (!didWarnAboutInvalidateContextType[name]) {
-          didWarnAboutInvalidateContextType[name] = true;
-          warningWithoutStack(
-            false,
-            '%s defines an invalid contextType. ' +
-              'contextType should point to the Context object returned by React.createContext(). ' +
-              'Did you accidentally pass the Context.Provider instead?',
-            name,
-          );
+  if (__DEV__) {
+    if ('contextType' in (type: any)) {
+      let isValid =
+        // Allow null for conditional declaration
+        contextType === null ||
+        (contextType !== undefined &&
+          contextType.$$typeof === REACT_CONTEXT_TYPE &&
+          contextType._context === undefined); // Not a <Context.Consumer>
+
+      if (!isValid && !didWarnAboutInvalidateContextType.has(type)) {
+        didWarnAboutInvalidateContextType.add(type);
+
+        let addendum = '';
+        if (contextType === undefined) {
+          addendum =
+            ' However, it is set to undefined. ' +
+            'This can be caused by a typo or by mixing up named and default imports. ' +
+            'This can also happen due to a circular dependency, so ' +
+            'try moving the createContext() call to a separate file.';
+        } else if (typeof contextType !== 'object') {
+          addendum = ' However, it is set to a ' + typeof contextType + '.';
+        } else if (contextType.$$typeof === REACT_PROVIDER_TYPE) {
+          addendum = ' Did you accidentally pass the Context.Provider instead?';
+        } else if (contextType._context !== undefined) {
+          // <Context.Consumer>
+          addendum = ' Did you accidentally pass the Context.Consumer instead?';
+        } else {
+          addendum =
+            ' However, it is set to an object with keys {' +
+            Object.keys(contextType).join(', ') +
+            '}.';
         }
+        warningWithoutStack(
+          false,
+          '%s defines an invalid contextType. ' +
+            'contextType should point to the Context object returned by React.createContext().%s',
+          getComponentName(type) || 'Component',
+          addendum,
+        );
       }
     }
+  }
+  if (typeof contextType === 'object' && contextType !== null) {
     validateContextBounds(contextType, threadID);
     return contextType[threadID];
   } else {

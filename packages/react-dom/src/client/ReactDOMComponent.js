@@ -13,13 +13,43 @@ import {registrationNameModules} from 'events/EventPluginRegistry';
 import warning from 'shared/warning';
 import {canUseDOM} from 'shared/ExecutionEnvironment';
 import warningWithoutStack from 'shared/warningWithoutStack';
+import type {ReactEventResponderEventType} from 'shared/ReactTypes';
+import type {DOMTopLevelEventType} from 'events/TopLevelEventTypes';
+import {setListenToResponderEventTypes} from '../events/DOMEventResponderSystem';
 
-import * as DOMPropertyOperations from './DOMPropertyOperations';
-import * as ReactDOMInput from './ReactDOMInput';
-import * as ReactDOMOption from './ReactDOMOption';
-import * as ReactDOMSelect from './ReactDOMSelect';
-import * as ReactDOMTextarea from './ReactDOMTextarea';
-import * as inputValueTracking from './inputValueTracking';
+import {
+  getValueForAttribute,
+  getValueForProperty,
+  setValueForProperty,
+} from './DOMPropertyOperations';
+import {
+  initWrapperState as ReactDOMInputInitWrapperState,
+  getHostProps as ReactDOMInputGetHostProps,
+  postMountWrapper as ReactDOMInputPostMountWrapper,
+  updateChecked as ReactDOMInputUpdateChecked,
+  updateWrapper as ReactDOMInputUpdateWrapper,
+  restoreControlledState as ReactDOMInputRestoreControlledState,
+} from './ReactDOMInput';
+import {
+  getHostProps as ReactDOMOptionGetHostProps,
+  postMountWrapper as ReactDOMOptionPostMountWrapper,
+  validateProps as ReactDOMOptionValidateProps,
+} from './ReactDOMOption';
+import {
+  initWrapperState as ReactDOMSelectInitWrapperState,
+  getHostProps as ReactDOMSelectGetHostProps,
+  postMountWrapper as ReactDOMSelectPostMountWrapper,
+  restoreControlledState as ReactDOMSelectRestoreControlledState,
+  postUpdateWrapper as ReactDOMSelectPostUpdateWrapper,
+} from './ReactDOMSelect';
+import {
+  initWrapperState as ReactDOMTextareaInitWrapperState,
+  getHostProps as ReactDOMTextareaGetHostProps,
+  postMountWrapper as ReactDOMTextareaPostMountWrapper,
+  updateWrapper as ReactDOMTextareaUpdateWrapper,
+  restoreControlledState as ReactDOMTextareaRestoreControlledState,
+} from './ReactDOMTextarea';
+import {track} from './inputValueTracking';
 import setInnerHTML from './setInnerHTML';
 import setTextContent from './setTextContent';
 import {
@@ -30,9 +60,18 @@ import {
   TOP_SUBMIT,
   TOP_TOGGLE,
 } from '../events/DOMTopLevelEventTypes';
-import {listenTo, trapBubbledEvent} from '../events/ReactBrowserEventEmitter';
+import {
+  listenTo,
+  trapBubbledEvent,
+  getListeningSetForElement,
+} from '../events/ReactBrowserEventEmitter';
+import {trapEventForResponderEventSystem} from '../events/ReactDOMEventListener.js';
 import {mediaEventTypes} from '../events/DOMTopLevelEventTypes';
-import * as CSSPropertyOperations from '../shared/CSSPropertyOperations';
+import {
+  createDangerousStringForStyles,
+  setValueForStyles,
+  validateShorthandPropertyCollisionInDev,
+} from '../shared/CSSPropertyOperations';
 import {Namespaces, getIntrinsicNamespace} from '../shared/DOMNamespaces';
 import {
   getPropertyInfo,
@@ -46,6 +85,8 @@ import possibleStandardNames from '../shared/possibleStandardNames';
 import {validateProperties as validateARIAProperties} from '../shared/ReactDOMInvalidARIAHook';
 import {validateProperties as validateInputProperties} from '../shared/ReactDOMNullInputValuePropHook';
 import {validateProperties as validateUnknownProperties} from '../shared/ReactDOMUnknownPropertyHook';
+
+import {enableEventAPI} from 'shared/ReactFeatureFlags';
 
 let didWarnInvalidHydration = false;
 let didWarnShadyDOM = false;
@@ -222,7 +263,10 @@ if (__DEV__) {
   };
 }
 
-function ensureListeningTo(rootContainerElement, registrationName) {
+function ensureListeningTo(
+  rootContainerElement: Element | Node,
+  registrationName: string,
+): void {
   const isDocumentOrFragment =
     rootContainerElement.nodeType === DOCUMENT_NODE ||
     rootContainerElement.nodeType === DOCUMENT_FRAGMENT_NODE;
@@ -276,7 +320,7 @@ function setInitialDOMProperties(
         }
       }
       // Relies on `updateStylesByID` not mutating `styleUpdates`.
-      CSSPropertyOperations.setValueForStyles(domElement, nextProp);
+      setValueForStyles(domElement, nextProp);
     } else if (propKey === DANGEROUSLY_SET_INNER_HTML) {
       const nextHtml = nextProp ? nextProp[HTML] : undefined;
       if (nextHtml != null) {
@@ -313,12 +357,7 @@ function setInitialDOMProperties(
         ensureListeningTo(rootContainerElement, propKey);
       }
     } else if (nextProp != null) {
-      DOMPropertyOperations.setValueForProperty(
-        domElement,
-        propKey,
-        nextProp,
-        isCustomComponentTag,
-      );
+      setValueForProperty(domElement, propKey, nextProp, isCustomComponentTag);
     }
   }
 }
@@ -334,18 +373,13 @@ function updateDOMProperties(
     const propKey = updatePayload[i];
     const propValue = updatePayload[i + 1];
     if (propKey === STYLE) {
-      CSSPropertyOperations.setValueForStyles(domElement, propValue);
+      setValueForStyles(domElement, propValue);
     } else if (propKey === DANGEROUSLY_SET_INNER_HTML) {
       setInnerHTML(domElement, propValue);
     } else if (propKey === CHILDREN) {
       setTextContent(domElement, propValue);
     } else {
-      DOMPropertyOperations.setValueForProperty(
-        domElement,
-        propKey,
-        propValue,
-        isCustomComponentTag,
-      );
+      setValueForProperty(domElement, propKey, propValue, isCustomComponentTag);
     }
   }
 }
@@ -398,14 +432,25 @@ export function createElement(
       // See discussion in https://github.com/facebook/react/pull/6896
       // and discussion in https://bugzilla.mozilla.org/show_bug.cgi?id=1276240
       domElement = ownerDocument.createElement(type);
-      // Normally attributes are assigned in `setInitialDOMProperties`, however the `multiple`
-      // attribute on `select`s needs to be added before `option`s are inserted. This prevents
-      // a bug where the `select` does not scroll to the correct option because singular
-      // `select` elements automatically pick the first item.
+      // Normally attributes are assigned in `setInitialDOMProperties`, however the `multiple` and `size`
+      // attributes on `select`s needs to be added before `option`s are inserted.
+      // This prevents:
+      // - a bug where the `select` does not scroll to the correct option because singular
+      //  `select` elements automatically pick the first item #13222
+      // - a bug where the `select` set the first item as selected despite the `size` attribute #14239
       // See https://github.com/facebook/react/issues/13222
-      if (type === 'select' && props.multiple) {
+      // and https://github.com/facebook/react/issues/14239
+      if (type === 'select') {
         const node = ((domElement: any): HTMLSelectElement);
-        node.multiple = true;
+        if (props.multiple) {
+          node.multiple = true;
+        } else if (props.size) {
+          // Setting a size greater than 1 causes a select to behave like `multiple=true`, where
+          // it is possible that no option is selected.
+          //
+          // This is only necessary when a select in "single selection mode".
+          node.size = props.size;
+        }
       }
     }
   } else {
@@ -505,28 +550,28 @@ export function setInitialProperties(
       props = rawProps;
       break;
     case 'input':
-      ReactDOMInput.initWrapperState(domElement, rawProps);
-      props = ReactDOMInput.getHostProps(domElement, rawProps);
+      ReactDOMInputInitWrapperState(domElement, rawProps);
+      props = ReactDOMInputGetHostProps(domElement, rawProps);
       trapBubbledEvent(TOP_INVALID, domElement);
       // For controlled components we always need to ensure we're listening
       // to onChange. Even if there is no listener.
       ensureListeningTo(rootContainerElement, 'onChange');
       break;
     case 'option':
-      ReactDOMOption.validateProps(domElement, rawProps);
-      props = ReactDOMOption.getHostProps(domElement, rawProps);
+      ReactDOMOptionValidateProps(domElement, rawProps);
+      props = ReactDOMOptionGetHostProps(domElement, rawProps);
       break;
     case 'select':
-      ReactDOMSelect.initWrapperState(domElement, rawProps);
-      props = ReactDOMSelect.getHostProps(domElement, rawProps);
+      ReactDOMSelectInitWrapperState(domElement, rawProps);
+      props = ReactDOMSelectGetHostProps(domElement, rawProps);
       trapBubbledEvent(TOP_INVALID, domElement);
       // For controlled components we always need to ensure we're listening
       // to onChange. Even if there is no listener.
       ensureListeningTo(rootContainerElement, 'onChange');
       break;
     case 'textarea':
-      ReactDOMTextarea.initWrapperState(domElement, rawProps);
-      props = ReactDOMTextarea.getHostProps(domElement, rawProps);
+      ReactDOMTextareaInitWrapperState(domElement, rawProps);
+      props = ReactDOMTextareaGetHostProps(domElement, rawProps);
       trapBubbledEvent(TOP_INVALID, domElement);
       // For controlled components we always need to ensure we're listening
       // to onChange. Even if there is no listener.
@@ -550,20 +595,20 @@ export function setInitialProperties(
     case 'input':
       // TODO: Make sure we check if this is still unmounted or do any clean
       // up necessary since we never stop tracking anymore.
-      inputValueTracking.track((domElement: any));
-      ReactDOMInput.postMountWrapper(domElement, rawProps, false);
+      track((domElement: any));
+      ReactDOMInputPostMountWrapper(domElement, rawProps, false);
       break;
     case 'textarea':
       // TODO: Make sure we check if this is still unmounted or do any clean
       // up necessary since we never stop tracking anymore.
-      inputValueTracking.track((domElement: any));
-      ReactDOMTextarea.postMountWrapper(domElement, rawProps);
+      track((domElement: any));
+      ReactDOMTextareaPostMountWrapper(domElement, rawProps);
       break;
     case 'option':
-      ReactDOMOption.postMountWrapper(domElement, rawProps);
+      ReactDOMOptionPostMountWrapper(domElement, rawProps);
       break;
     case 'select':
-      ReactDOMSelect.postMountWrapper(domElement, rawProps);
+      ReactDOMSelectPostMountWrapper(domElement, rawProps);
       break;
     default:
       if (typeof props.onClick === 'function') {
@@ -592,23 +637,23 @@ export function diffProperties(
   let nextProps: Object;
   switch (tag) {
     case 'input':
-      lastProps = ReactDOMInput.getHostProps(domElement, lastRawProps);
-      nextProps = ReactDOMInput.getHostProps(domElement, nextRawProps);
+      lastProps = ReactDOMInputGetHostProps(domElement, lastRawProps);
+      nextProps = ReactDOMInputGetHostProps(domElement, nextRawProps);
       updatePayload = [];
       break;
     case 'option':
-      lastProps = ReactDOMOption.getHostProps(domElement, lastRawProps);
-      nextProps = ReactDOMOption.getHostProps(domElement, nextRawProps);
+      lastProps = ReactDOMOptionGetHostProps(domElement, lastRawProps);
+      nextProps = ReactDOMOptionGetHostProps(domElement, nextRawProps);
       updatePayload = [];
       break;
     case 'select':
-      lastProps = ReactDOMSelect.getHostProps(domElement, lastRawProps);
-      nextProps = ReactDOMSelect.getHostProps(domElement, nextRawProps);
+      lastProps = ReactDOMSelectGetHostProps(domElement, lastRawProps);
+      nextProps = ReactDOMSelectGetHostProps(domElement, nextRawProps);
       updatePayload = [];
       break;
     case 'textarea':
-      lastProps = ReactDOMTextarea.getHostProps(domElement, lastRawProps);
-      nextProps = ReactDOMTextarea.getHostProps(domElement, nextRawProps);
+      lastProps = ReactDOMTextareaGetHostProps(domElement, lastRawProps);
+      nextProps = ReactDOMTextareaGetHostProps(domElement, nextRawProps);
       updatePayload = [];
       break;
     default:
@@ -767,10 +812,7 @@ export function diffProperties(
   }
   if (styleUpdates) {
     if (__DEV__) {
-      CSSPropertyOperations.validateShorthandPropertyCollisionInDev(
-        styleUpdates,
-        nextProps[STYLE],
-      );
+      validateShorthandPropertyCollisionInDev(styleUpdates, nextProps[STYLE]);
     }
     (updatePayload = updatePayload || []).push(STYLE, styleUpdates);
   }
@@ -793,7 +835,7 @@ export function updateProperties(
     nextRawProps.type === 'radio' &&
     nextRawProps.name != null
   ) {
-    ReactDOMInput.updateChecked(domElement, nextRawProps);
+    ReactDOMInputUpdateChecked(domElement, nextRawProps);
   }
 
   const wasCustomComponentTag = isCustomComponent(tag, lastRawProps);
@@ -813,15 +855,15 @@ export function updateProperties(
       // Update the wrapper around inputs *after* updating props. This has to
       // happen after `updateDOMProperties`. Otherwise HTML5 input validations
       // raise warnings and prevent the new value from being assigned.
-      ReactDOMInput.updateWrapper(domElement, nextRawProps);
+      ReactDOMInputUpdateWrapper(domElement, nextRawProps);
       break;
     case 'textarea':
-      ReactDOMTextarea.updateWrapper(domElement, nextRawProps);
+      ReactDOMTextareaUpdateWrapper(domElement, nextRawProps);
       break;
     case 'select':
       // <select> value update needs to occur after <option> children
       // reconciliation
-      ReactDOMSelect.postUpdateWrapper(domElement, nextRawProps);
+      ReactDOMSelectPostUpdateWrapper(domElement, nextRawProps);
       break;
   }
 }
@@ -896,24 +938,24 @@ export function diffHydratedProperties(
       trapBubbledEvent(TOP_TOGGLE, domElement);
       break;
     case 'input':
-      ReactDOMInput.initWrapperState(domElement, rawProps);
+      ReactDOMInputInitWrapperState(domElement, rawProps);
       trapBubbledEvent(TOP_INVALID, domElement);
       // For controlled components we always need to ensure we're listening
       // to onChange. Even if there is no listener.
       ensureListeningTo(rootContainerElement, 'onChange');
       break;
     case 'option':
-      ReactDOMOption.validateProps(domElement, rawProps);
+      ReactDOMOptionValidateProps(domElement, rawProps);
       break;
     case 'select':
-      ReactDOMSelect.initWrapperState(domElement, rawProps);
+      ReactDOMSelectInitWrapperState(domElement, rawProps);
       trapBubbledEvent(TOP_INVALID, domElement);
       // For controlled components we always need to ensure we're listening
       // to onChange. Even if there is no listener.
       ensureListeningTo(rootContainerElement, 'onChange');
       break;
     case 'textarea':
-      ReactDOMTextarea.initWrapperState(domElement, rawProps);
+      ReactDOMTextareaInitWrapperState(domElement, rawProps);
       trapBubbledEvent(TOP_INVALID, domElement);
       // For controlled components we always need to ensure we're listening
       // to onChange. Even if there is no listener.
@@ -1021,9 +1063,7 @@ export function diffHydratedProperties(
         extraAttributeNames.delete(propKey);
 
         if (canDiffStyleForHydrationWarning) {
-          const expectedStyle = CSSPropertyOperations.createDangerousStringForStyles(
-            nextProp,
-          );
+          const expectedStyle = createDangerousStringForStyles(nextProp);
           serverValue = domElement.getAttribute('style');
           if (expectedStyle !== serverValue) {
             warnForPropDifference(propKey, serverValue, expectedStyle);
@@ -1032,11 +1072,7 @@ export function diffHydratedProperties(
       } else if (isCustomComponentTag) {
         // $FlowFixMe - Should be inferred as not undefined.
         extraAttributeNames.delete(propKey.toLowerCase());
-        serverValue = DOMPropertyOperations.getValueForAttribute(
-          domElement,
-          propKey,
-          nextProp,
-        );
+        serverValue = getValueForAttribute(domElement, propKey, nextProp);
 
         if (nextProp !== serverValue) {
           warnForPropDifference(propKey, serverValue, nextProp);
@@ -1054,7 +1090,7 @@ export function diffHydratedProperties(
         if (propertyInfo !== null) {
           // $FlowFixMe - Should be inferred as not undefined.
           extraAttributeNames.delete(propertyInfo.attributeName);
-          serverValue = DOMPropertyOperations.getValueForProperty(
+          serverValue = getValueForProperty(
             domElement,
             propKey,
             nextProp,
@@ -1083,11 +1119,7 @@ export function diffHydratedProperties(
             // $FlowFixMe - Should be inferred as not undefined.
             extraAttributeNames.delete(propKey);
           }
-          serverValue = DOMPropertyOperations.getValueForAttribute(
-            domElement,
-            propKey,
-            nextProp,
-          );
+          serverValue = getValueForAttribute(domElement, propKey, nextProp);
         }
 
         if (nextProp !== serverValue && !isMismatchDueToBadCasing) {
@@ -1109,14 +1141,14 @@ export function diffHydratedProperties(
     case 'input':
       // TODO: Make sure we check if this is still unmounted or do any clean
       // up necessary since we never stop tracking anymore.
-      inputValueTracking.track((domElement: any));
-      ReactDOMInput.postMountWrapper(domElement, rawProps, true);
+      track((domElement: any));
+      ReactDOMInputPostMountWrapper(domElement, rawProps, true);
       break;
     case 'textarea':
       // TODO: Make sure we check if this is still unmounted or do any clean
       // up necessary since we never stop tracking anymore.
-      inputValueTracking.track((domElement: any));
-      ReactDOMTextarea.postMountWrapper(domElement, rawProps);
+      track((domElement: any));
+      ReactDOMTextareaPostMountWrapper(domElement, rawProps);
       break;
     case 'select':
     case 'option':
@@ -1235,13 +1267,79 @@ export function restoreControlledState(
 ): void {
   switch (tag) {
     case 'input':
-      ReactDOMInput.restoreControlledState(domElement, props);
+      ReactDOMInputRestoreControlledState(domElement, props);
       return;
     case 'textarea':
-      ReactDOMTextarea.restoreControlledState(domElement, props);
+      ReactDOMTextareaRestoreControlledState(domElement, props);
       return;
     case 'select':
-      ReactDOMSelect.restoreControlledState(domElement, props);
+      ReactDOMSelectRestoreControlledState(domElement, props);
       return;
   }
+}
+
+export function listenToEventResponderEventTypes(
+  eventTypes: Array<ReactEventResponderEventType>,
+  element: Element | Document,
+): void {
+  if (enableEventAPI) {
+    // Get the listening Set for this element. We use this to track
+    // what events we're listening to.
+    const listeningSet = getListeningSetForElement(element);
+
+    // Go through each target event type of the event responder
+    for (let i = 0, length = eventTypes.length; i < length; ++i) {
+      const targetEventType = eventTypes[i];
+      let topLevelType;
+      let capture = false;
+      let passive = true;
+
+      // If no event config object is provided (i.e. - only a string),
+      // we default to enabling passive and not capture.
+      if (typeof targetEventType === 'string') {
+        topLevelType = targetEventType;
+      } else {
+        if (__DEV__) {
+          warning(
+            typeof targetEventType === 'object' && targetEventType !== null,
+            'Event Responder: invalid entry in targetEventTypes array. ' +
+              'Entry must be string or an object. Instead, got %s.',
+            targetEventType,
+          );
+        }
+        const targetEventConfigObject = ((targetEventType: any): {
+          name: string,
+          passive?: boolean,
+          capture?: boolean,
+        });
+        topLevelType = targetEventConfigObject.name;
+        if (targetEventConfigObject.passive !== undefined) {
+          passive = targetEventConfigObject.passive;
+        }
+        if (targetEventConfigObject.capture !== undefined) {
+          capture = targetEventConfigObject.capture;
+        }
+      }
+      // Create a unique name for this event, plus its properties. We'll
+      // use this to ensure we don't listen to the same event with the same
+      // properties again.
+      const passiveKey = passive ? '_passive' : '_active';
+      const captureKey = capture ? '_capture' : '';
+      const listeningName = `${topLevelType}${passiveKey}${captureKey}`;
+      if (!listeningSet.has(listeningName)) {
+        trapEventForResponderEventSystem(
+          element,
+          ((topLevelType: any): DOMTopLevelEventType),
+          capture,
+          passive,
+        );
+        listeningSet.add(listeningName);
+      }
+    }
+  }
+}
+
+// We can remove this once the event API is stable and out of a flag
+if (enableEventAPI) {
+  setListenToResponderEventTypes(listenToEventResponderEventTypes);
 }

@@ -16,6 +16,17 @@ const {
   unstable_now,
   unstable_scheduleCallback,
   unstable_shouldYield,
+  unstable_getFirstCallbackNode,
+  unstable_runWithPriority,
+  unstable_next,
+  unstable_continueExecution,
+  unstable_pauseExecution,
+  unstable_getCurrentPriorityLevel,
+  unstable_ImmediatePriority,
+  unstable_UserBlockingPriority,
+  unstable_NormalPriority,
+  unstable_LowPriority,
+  unstable_IdlePriority,
 } = ReactInternals.Scheduler;
 
 export {
@@ -23,4 +34,15 @@ export {
   unstable_now,
   unstable_scheduleCallback,
   unstable_shouldYield,
+  unstable_getFirstCallbackNode,
+  unstable_runWithPriority,
+  unstable_next,
+  unstable_continueExecution,
+  unstable_pauseExecution,
+  unstable_getCurrentPriorityLevel,
+  unstable_ImmediatePriority,
+  unstable_UserBlockingPriority,
+  unstable_NormalPriority,
+  unstable_LowPriority,
+  unstable_IdlePriority,
 };

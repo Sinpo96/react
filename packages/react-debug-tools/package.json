@@ -12,11 +12,16 @@
   "files": [
     "LICENSE",
     "README.md",
+    "build-info.json",
     "index.js",
     "cjs/"
   ],
   "main": "index.js",
-  "repository": "facebook/react",
+  "repository": {
+    "type" : "git",
+    "url" : "https://github.com/facebook/react.git",
+    "directory": "packages/react-debug-tools"
+  },
   "engines": {
     "node": ">=0.10.0"
   },

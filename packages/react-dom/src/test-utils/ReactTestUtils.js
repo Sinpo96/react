@@ -4,11 +4,12 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
+import type {Thenable} from 'react-reconciler/src/ReactFiberScheduler';
 
 import React from 'react';
 import ReactDOM from 'react-dom';
 import {findCurrentFiberUsingSlowPath} from 'react-reconciler/reflection';
-import * as ReactInstanceMap from 'shared/ReactInstanceMap';
+import {get as getInstance} from 'shared/ReactInstanceMap';
 import {
   ClassComponent,
   FunctionComponent,
@@ -18,12 +19,15 @@ import {
 import SyntheticEvent from 'events/SyntheticEvent';
 import invariant from 'shared/invariant';
 import lowPriorityWarning from 'shared/lowPriorityWarning';
+import warningWithoutStack from 'shared/warningWithoutStack';
 import {ELEMENT_NODE} from '../shared/HTMLNodeType';
 import * as DOMTopLevelEventTypes from '../events/DOMTopLevelEventTypes';
+import {PLUGIN_EVENT_SYSTEM} from 'events/EventSystemFlags';
+import act from './ReactTestUtilsAct';
 
 const {findDOMNode} = ReactDOM;
 // Keep in sync with ReactDOMUnstableNativeDependencies.js
-// and ReactDOM.js:
+// ReactDOM.js, and ReactTestUtilsAct.js:
 const [
   getInstanceFromNode,
   /* eslint-disable no-unused-vars */
@@ -38,6 +42,8 @@ const [
   restoreStateIfNeeded,
   dispatchEvent,
   runEventsInBatch,
+  // eslint-disable-next-line no-unused-vars
+  flushPassiveEffects,
 ] = ReactDOM.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.Events;
 
 function Event(suffix) {}
@@ -57,7 +63,7 @@ let hasWarnedAboutDeprecatedMockComponent = false;
  */
 function simulateNativeEventOnNode(topLevelType, node, fakeNativeEvent) {
   fakeNativeEvent.target = node;
-  dispatchEvent(topLevelType, fakeNativeEvent);
+  dispatchEvent(topLevelType, PLUGIN_EVENT_SYSTEM, fakeNativeEvent);
 }
 
 /**
@@ -121,7 +127,7 @@ function validateClassInstance(inst, methodName) {
     // This is probably too relaxed but it's existing behavior.
     return;
   }
-  if (ReactInstanceMap.get(inst)) {
+  if (getInstance(inst)) {
     // This is a public instance indeed.
     return;
   }
@@ -144,6 +150,12 @@ function validateClassInstance(inst, methodName) {
     received,
   );
 }
+
+// a plain dom element, lazily initialized, used by act() when flushing effects
+let actContainerElement = null;
+
+// a warning for when you try to use TestUtils.act in a non-browser environment
+let didWarnAboutActInNodejs = false;
 
 /**
  * Utilities for making it easy to test React components.
@@ -198,7 +210,7 @@ const ReactTestUtils = {
     if (!ReactTestUtils.isCompositeComponent(inst)) {
       return false;
     }
-    const internalInstance = ReactInstanceMap.get(inst);
+    const internalInstance = getInstance(inst);
     const constructor = internalInstance.type;
     return constructor === type;
   },
@@ -208,7 +220,7 @@ const ReactTestUtils = {
     if (!inst) {
       return [];
     }
-    const internalInstance = ReactInstanceMap.get(inst);
+    const internalInstance = getInstance(inst);
     return findAllInRenderedFiberTreeInternal(internalInstance, test);
   },
 
@@ -380,6 +392,26 @@ const ReactTestUtils = {
 
   Simulate: null,
   SimulateNative: {},
+
+  act(callback: () => Thenable) {
+    if (actContainerElement === null) {
+      if (__DEV__) {
+        // warn if we're trying to use this in something like node (without jsdom)
+        if (didWarnAboutActInNodejs === false) {
+          didWarnAboutActInNodejs = true;
+          warningWithoutStack(
+            typeof document !== 'undefined' && document !== null,
+            'It looks like you called ReactTestUtils.act(...) in a non-browser environment. ' +
+              "If you're using TestRenderer for your tests, you should call " +
+              'ReactTestRenderer.act(...) instead of ReactTestUtils.act(...).',
+          );
+        }
+      }
+      // now make the stub element
+      actContainerElement = document.createElement('div');
+    }
+    return act(callback);
+  },
 };
 
 /**
@@ -433,7 +465,7 @@ function makeSimulator(eventType) {
 
     ReactDOM.unstable_batchedUpdates(function() {
       // Normally extractEvent enqueues a state restore, but we'll just always
-      // do that since we we're by-passing it here.
+      // do that since we're by-passing it here.
       enqueueStateRestore(domNode);
       runEventsInBatch(event);
     });

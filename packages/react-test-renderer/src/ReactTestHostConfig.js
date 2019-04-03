@@ -8,7 +8,11 @@
  */
 
 import warning from 'shared/warning';
-import * as TestRendererScheduling from './ReactTestRendererScheduling';
+
+import type {ReactEventResponder} from 'shared/ReactTypes';
+import {REACT_EVENT_TARGET_TOUCH_HIT} from 'shared/ReactSymbols';
+
+import {enableEventAPI} from 'shared/ReactFeatureFlags';
 
 export type Type = string;
 export type Props = Object;
@@ -41,6 +45,9 @@ export type NoTimeout = -1;
 export * from 'shared/HostConfigWithNoPersistence';
 export * from 'shared/HostConfigWithNoHydration';
 
+const EVENT_COMPONENT_CONTEXT = {};
+const EVENT_TARGET_CONTEXT = {};
+const EVENT_TOUCH_HIT_TARGET_CONTEXT = {};
 const NO_CONTEXT = {};
 const UPDATE_SIGNAL = {};
 if (__DEV__) {
@@ -116,6 +123,38 @@ export function getChildHostContext(
   return NO_CONTEXT;
 }
 
+export function getChildHostContextForEventComponent(
+  parentHostContext: HostContext,
+): HostContext {
+  if (__DEV__ && enableEventAPI) {
+    warning(
+      parentHostContext !== EVENT_TARGET_CONTEXT &&
+        parentHostContext !== EVENT_TOUCH_HIT_TARGET_CONTEXT,
+      'validateDOMNesting: React event targets must not have event components as children.',
+    );
+    return EVENT_COMPONENT_CONTEXT;
+  }
+  return NO_CONTEXT;
+}
+
+export function getChildHostContextForEventTarget(
+  parentHostContext: HostContext,
+  type: Symbol | number,
+): HostContext {
+  if (__DEV__ && enableEventAPI) {
+    if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
+      warning(
+        parentHostContext !== EVENT_COMPONENT_CONTEXT,
+        'validateDOMNesting: <TouchHitTarget> cannot not be a direct child of an event component. ' +
+          'Ensure <TouchHitTarget> is a direct child of a DOM element.',
+      );
+      return EVENT_TOUCH_HIT_TARGET_CONTEXT;
+    }
+    return EVENT_TARGET_CONTEXT;
+  }
+  return NO_CONTEXT;
+}
+
 export function prepareForCommit(containerInfo: Container): void {
   // noop
 }
@@ -131,6 +170,12 @@ export function createInstance(
   hostContext: Object,
   internalInstanceHandle: Object,
 ): Instance {
+  if (__DEV__ && enableEventAPI) {
+    warning(
+      hostContext !== EVENT_TOUCH_HIT_TARGET_CONTEXT,
+      'validateDOMNesting: <TouchHitTarget> must not have any children.',
+    );
+  }
   return {
     type,
     props,
@@ -187,6 +232,24 @@ export function createTextInstance(
   hostContext: Object,
   internalInstanceHandle: Object,
 ): TextInstance {
+  if (__DEV__ && enableEventAPI) {
+    warning(
+      hostContext !== EVENT_TOUCH_HIT_TARGET_CONTEXT,
+      'validateDOMNesting: <TouchHitTarget> must not have any children.',
+    );
+    warning(
+      hostContext !== EVENT_COMPONENT_CONTEXT,
+      'validateDOMNesting: React event components cannot have text DOM nodes as children. ' +
+        'Wrap the child text "%s" in an element.',
+      text,
+    );
+    warning(
+      hostContext !== EVENT_TARGET_CONTEXT,
+      'validateDOMNesting: React event targets cannot have text DOM nodes as children. ' +
+        'Wrap the child text "%s" in an element.',
+      text,
+    );
+  }
   return {
     text,
     isHidden: false,
@@ -195,14 +258,6 @@ export function createTextInstance(
 }
 
 export const isPrimaryRenderer = false;
-// This approach enables `now` to be mocked by tests,
-// Even after the reconciler has initialized and read host config values.
-export const now = () => TestRendererScheduling.nowImplementation();
-export const scheduleDeferredCallback =
-  TestRendererScheduling.scheduleDeferredCallback;
-export const cancelDeferredCallback =
-  TestRendererScheduling.cancelDeferredCallback;
-export const shouldYield = TestRendererScheduling.shouldYield;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
@@ -268,4 +323,23 @@ export function unhideTextInstance(
   text: string,
 ): void {
   textInstance.isHidden = false;
+}
+
+export function handleEventComponent(
+  eventResponder: ReactEventResponder,
+  rootContainerInstance: Container,
+  internalInstanceHandle: Object,
+) {
+  // TODO: add handleEventComponent implementation
+}
+
+export function handleEventTarget(
+  type: Symbol | number,
+  props: Props,
+  parentInstance: Container,
+  internalInstanceHandle: Object,
+) {
+  if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
+    // TODO
+  }
 }

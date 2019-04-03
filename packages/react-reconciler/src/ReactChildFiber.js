@@ -80,7 +80,7 @@ if (__DEV__) {
     child._store.validated = true;
 
     const currentComponentErrorInfo =
-      'Each child in an array or iterator should have a unique ' +
+      'Each child in a list should have a unique ' +
       '"key" prop. See https://fb.me/react-warning-keys for ' +
       'more information.' +
       getCurrentFiberStackInDev();
@@ -91,7 +91,7 @@ if (__DEV__) {
 
     warning(
       false,
-      'Each child in an array or iterator should have a unique ' +
+      'Each child in a list should have a unique ' +
         '"key" prop. See https://fb.me/react-warning-keys for ' +
         'more information.',
     );
@@ -138,7 +138,8 @@ function coerceRef(
         const ownerFiber = ((owner: any): Fiber);
         invariant(
           ownerFiber.tag === ClassComponent,
-          'Function components cannot have refs.',
+          'Function components cannot have refs. ' +
+            'Did you mean to use React.forwardRef()?',
         );
         inst = ownerFiber.stateNode;
       }
@@ -735,7 +736,7 @@ function ChildReconciler(shouldTrackSideEffects) {
     newChildren: Array<*>,
     expirationTime: ExpirationTime,
   ): Fiber | null {
-    // This algorithm can't optimize by searching from boths ends since we
+    // This algorithm can't optimize by searching from both ends since we
     // don't have backpointers on fibers. I'm trying to see how far we can get
     // with that model. If it ends up not being worth the tradeoffs, we can
     // add it later.

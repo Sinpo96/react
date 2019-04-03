@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2013-present, Facebook, Inc.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -11,23 +11,41 @@ import type {ReactContext} from 'shared/ReactTypes';
 import invariant from 'shared/invariant';
 import warning from 'shared/warning';
 
-import ReactCurrentOwner from './ReactCurrentOwner';
+import ReactCurrentDispatcher from './ReactCurrentDispatcher';
 
 function resolveDispatcher() {
-  const dispatcher = ReactCurrentOwner.currentDispatcher;
+  const dispatcher = ReactCurrentDispatcher.current;
   invariant(
     dispatcher !== null,
-    'Hooks can only be called inside the body of a function component.',
+    'Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for' +
+      ' one of the following reasons:\n' +
+      '1. You might have mismatching versions of React and the renderer (such as React DOM)\n' +
+      '2. You might be breaking the Rules of Hooks\n' +
+      '3. You might have more than one copy of React in the same app\n' +
+      'See https://fb.me/react-invalid-hook-call for tips about how to debug and fix this problem.',
   );
   return dispatcher;
 }
 
 export function useContext<T>(
   Context: ReactContext<T>,
-  observedBits: number | boolean | void,
+  unstable_observedBits: number | boolean | void,
 ) {
   const dispatcher = resolveDispatcher();
   if (__DEV__) {
+    warning(
+      unstable_observedBits === undefined,
+      'useContext() second argument is reserved for future ' +
+        'use in React. Passing it is not supported. ' +
+        'You passed: %s.%s',
+      unstable_observedBits,
+      typeof unstable_observedBits === 'number' && Array.isArray(arguments[2])
+        ? '\n\nDid you call array.map(useContext)? ' +
+          'Calling Hooks inside a loop is not supported. ' +
+          'Learn more at https://fb.me/rules-of-hooks'
+        : '',
+    );
+
     // TODO: add a more generic warning for invalid values.
     if ((Context: any)._context !== undefined) {
       const realContext = (Context: any)._context;
@@ -48,7 +66,7 @@ export function useContext<T>(
       }
     }
   }
-  return dispatcher.useContext(Context, observedBits);
+  return dispatcher.useContext(Context, unstable_observedBits);
 }
 
 export function useState<S>(initialState: (() => S) | S) {
@@ -56,13 +74,13 @@ export function useState<S>(initialState: (() => S) | S) {
   return dispatcher.useState(initialState);
 }
 
-export function useReducer<S, A>(
+export function useReducer<S, I, A>(
   reducer: (S, A) => S,
-  initialState: S,
-  initialAction: A | void | null,
+  initialArg: I,
+  init?: I => S,
 ) {
   const dispatcher = resolveDispatcher();
-  return dispatcher.useReducer(reducer, initialState, initialAction);
+  return dispatcher.useReducer(reducer, initialArg, init);
 }
 
 export function useRef<T>(initialValue: T): {current: T} {
@@ -71,23 +89,15 @@ export function useRef<T>(initialValue: T): {current: T} {
 }
 
 export function useEffect(
-  create: () => mixed,
+  create: () => (() => void) | void,
   inputs: Array<mixed> | void | null,
 ) {
   const dispatcher = resolveDispatcher();
   return dispatcher.useEffect(create, inputs);
 }
 
-export function useMutationEffect(
-  create: () => mixed,
-  inputs: Array<mixed> | void | null,
-) {
-  const dispatcher = resolveDispatcher();
-  return dispatcher.useMutationEffect(create, inputs);
-}
-
 export function useLayoutEffect(
-  create: () => mixed,
+  create: () => (() => void) | void,
   inputs: Array<mixed> | void | null,
 ) {
   const dispatcher = resolveDispatcher();
@@ -110,11 +120,18 @@ export function useMemo(
   return dispatcher.useMemo(create, inputs);
 }
 
-export function useImperativeMethods<T>(
+export function useImperativeHandle<T>(
   ref: {current: T | null} | ((inst: T | null) => mixed) | null | void,
   create: () => T,
   inputs: Array<mixed> | void | null,
 ): void {
   const dispatcher = resolveDispatcher();
-  return dispatcher.useImperativeMethods(ref, create, inputs);
+  return dispatcher.useImperativeHandle(ref, create, inputs);
+}
+
+export function useDebugValue(value: any, formatterFn: ?(value: any) => any) {
+  if (__DEV__) {
+    const dispatcher = resolveDispatcher();
+    return dispatcher.useDebugValue(value, formatterFn);
+  }
 }

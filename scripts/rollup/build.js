@@ -113,7 +113,7 @@ function getBabelConfig(updateBabelOptions, bundleType, filename) {
       return Object.assign({}, options, {
         plugins: options.plugins.concat([
           // Minify invariant messages
-          require('../error-codes/replace-invariant-error-codes'),
+          require('../error-codes/minify-error-messages'),
           // Wrap warning() calls in a __DEV__ check so they are stripped from production.
           require('../babel/wrap-warning-with-env-check'),
         ]),
@@ -141,7 +141,7 @@ function getBabelConfig(updateBabelOptions, bundleType, filename) {
           // Use object-assign polyfill in open source
           path.resolve('./scripts/babel/transform-object-assign-require'),
           // Minify invariant messages
-          require('../error-codes/replace-invariant-error-codes'),
+          require('../error-codes/minify-error-messages'),
           // Wrap warning() calls in a __DEV__ check so they are stripped from production.
           require('../babel/wrap-warning-with-env-check'),
         ]),
@@ -298,7 +298,6 @@ function getPlugins(
   bundleType,
   globalName,
   moduleType,
-  modulesToStub,
   pureExternalModules
 ) {
   const findAndRecordErrorCodes = extractErrorCodes(errorCodeOpts);
@@ -501,7 +500,6 @@ async function createBundle(bundle, bundleType) {
       bundleType,
       bundle.global,
       bundle.moduleType,
-      bundle.modulesToStub,
       pureExternalModules
     ),
     // We can't use getters in www.

@@ -10,6 +10,7 @@
 import type {
   Instance,
   TextInstance,
+  SuspenseInstance,
   Container,
   ChildSet,
   UpdatePayload,
@@ -20,11 +21,13 @@ import type {ExpirationTime} from './ReactFiberExpirationTime';
 import type {CapturedValue, CapturedError} from './ReactCapturedValue';
 import type {SuspenseState} from './ReactFiberSuspenseComponent';
 import type {FunctionComponentUpdateQueue} from './ReactFiberHooks';
+import type {Thenable} from './ReactFiberScheduler';
 
+import {unstable_wrap as Schedule_tracing_wrap} from 'scheduler/tracing';
 import {
-  enableHooks,
   enableSchedulerTracing,
   enableProfilerTimer,
+  enableSuspenseServerRenderer,
 } from 'shared/ReactFeatureFlags';
 import {
   FunctionComponent,
@@ -36,6 +39,7 @@ import {
   HostPortal,
   Profiler,
   SuspenseComponent,
+  DehydratedSuspenseComponent,
   IncompleteClassComponent,
   MemoComponent,
   SimpleMemoComponent,
@@ -78,6 +82,8 @@ import {
   insertInContainerBefore,
   removeChild,
   removeChildFromContainer,
+  clearSuspenseBoundary,
+  clearSuspenseBoundaryFromContainer,
   replaceContainerChildren,
   createContainerChildSet,
   hideInstance,
@@ -88,6 +94,7 @@ import {
 import {
   captureCommitPhaseError,
   requestCurrentTime,
+  resolveRetryThenable,
 } from './ReactFiberScheduler';
 import {
   NoEffect as NoHookEffect,
@@ -99,11 +106,14 @@ import {
   UnmountPassive,
   MountPassive,
 } from './ReactHookEffectTags';
+import {didWarnAboutReassigningProps} from './ReactFiberBeginWork';
 
 let didWarnAboutUndefinedSnapshotBeforeUpdate: Set<mixed> | null = null;
 if (__DEV__) {
   didWarnAboutUndefinedSnapshotBeforeUpdate = new Set();
 }
+
+const PossiblyWeakSet = typeof WeakSet === 'function' ? WeakSet : Set;
 
 export function logError(boundary: Fiber, errorInfo: CapturedValue<mixed>) {
   const source = errorInfo.source;
@@ -234,18 +244,27 @@ function commitBeforeMutationLifeCycles(
           // but instead we rely on them being set during last render.
           // TODO: revisit this when we implement resuming.
           if (__DEV__) {
-            if (finishedWork.type === finishedWork.elementType) {
+            if (
+              finishedWork.type === finishedWork.elementType &&
+              !didWarnAboutReassigningProps
+            ) {
               warning(
                 instance.props === finishedWork.memoizedProps,
-                'Expected instance props to match memoized props before ' +
-                  'getSnapshotBeforeUpdate. This is likely due to a bug in React. ' +
+                'Expected %s props to match memoized props before ' +
+                  'getSnapshotBeforeUpdate. ' +
+                  'This might either be because of a bug in React, or because ' +
+                  'a component reassigns its own `this.props`. ' +
                   'Please file an issue.',
+                getComponentName(finishedWork.type) || 'instance',
               );
               warning(
                 instance.state === finishedWork.memoizedState,
-                'Expected instance state to match memoized state before ' +
-                  'getSnapshotBeforeUpdate. This is likely due to a bug in React. ' +
+                'Expected %s state to match memoized state before ' +
+                  'getSnapshotBeforeUpdate. ' +
+                  'This might either be because of a bug in React, or because ' +
+                  'a component reassigns its own `this.props`. ' +
                   'Please file an issue.',
+                getComponentName(finishedWork.type) || 'instance',
               );
             }
           }
@@ -297,9 +316,6 @@ function commitHookEffectList(
   mountTag: number,
   finishedWork: Fiber,
 ) {
-  if (!enableHooks) {
-    return;
-  }
   const updateQueue: FunctionComponentUpdateQueue | null = (finishedWork.updateQueue: any);
   let lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
   if (lastEffect !== null) {
@@ -309,34 +325,50 @@ function commitHookEffectList(
       if ((effect.tag & unmountTag) !== NoHookEffect) {
         // Unmount
         const destroy = effect.destroy;
-        effect.destroy = null;
-        if (destroy !== null) {
+        effect.destroy = undefined;
+        if (destroy !== undefined) {
           destroy();
         }
       }
       if ((effect.tag & mountTag) !== NoHookEffect) {
         // Mount
         const create = effect.create;
-        let destroy = create();
-        if (typeof destroy !== 'function') {
-          if (__DEV__) {
-            if (destroy !== null && destroy !== undefined) {
-              warningWithoutStack(
-                false,
-                'useEffect function must return a cleanup function or ' +
-                  'nothing.%s%s',
-                typeof destroy.then === 'function'
-                  ? ' Promises and useEffect(async () => ...) are not ' +
-                    'supported, but you can call an async function inside an ' +
-                    'effect.'
-                  : '',
-                getStackByFiberInDevAndProd(finishedWork),
-              );
+        effect.destroy = create();
+
+        if (__DEV__) {
+          const destroy = effect.destroy;
+          if (destroy !== undefined && typeof destroy !== 'function') {
+            let addendum;
+            if (destroy === null) {
+              addendum =
+                ' You returned null. If your effect does not require clean ' +
+                'up, return undefined (or nothing).';
+            } else if (typeof destroy.then === 'function') {
+              addendum =
+                '\n\nIt looks like you wrote useEffect(async () => ...) or returned a Promise. ' +
+                'Instead, write the async function inside your effect ' +
+                'and call it immediately:\n\n' +
+                'useEffect(() => {\n' +
+                '  async function fetchData() {\n' +
+                '    // You can await here\n' +
+                '    const response = await MyAPI.getData(someId);\n' +
+                '    // ...\n' +
+                '  }\n' +
+                '  fetchData();\n' +
+                `}, [someId]); // Or [] if effect doesn't need props or state\n\n` +
+                'Learn more about data fetching with Hooks: https://fb.me/react-hooks-data-fetching';
+            } else {
+              addendum = ' You returned: ' + destroy;
             }
+            warningWithoutStack(
+              false,
+              'An effect function must not return anything besides a function, ' +
+                'which is used for clean-up.%s%s',
+              addendum,
+              getStackByFiberInDevAndProd(finishedWork),
+            );
           }
-          destroy = null;
         }
-        effect.destroy = destroy;
       }
       effect = effect.next;
     } while (effect !== firstEffect);
@@ -370,18 +402,27 @@ function commitLifeCycles(
           // but instead we rely on them being set during last render.
           // TODO: revisit this when we implement resuming.
           if (__DEV__) {
-            if (finishedWork.type === finishedWork.elementType) {
+            if (
+              finishedWork.type === finishedWork.elementType &&
+              !didWarnAboutReassigningProps
+            ) {
               warning(
                 instance.props === finishedWork.memoizedProps,
-                'Expected instance props to match memoized props before ' +
-                  'componentDidMount. This is likely due to a bug in React. ' +
+                'Expected %s props to match memoized props before ' +
+                  'componentDidMount. ' +
+                  'This might either be because of a bug in React, or because ' +
+                  'a component reassigns its own `this.props`. ' +
                   'Please file an issue.',
+                getComponentName(finishedWork.type) || 'instance',
               );
               warning(
                 instance.state === finishedWork.memoizedState,
-                'Expected instance state to match memoized state before ' +
-                  'componentDidMount. This is likely due to a bug in React. ' +
+                'Expected %s state to match memoized state before ' +
+                  'componentDidMount. ' +
+                  'This might either be because of a bug in React, or because ' +
+                  'a component reassigns its own `this.props`. ' +
                   'Please file an issue.',
+                getComponentName(finishedWork.type) || 'instance',
               );
             }
           }
@@ -398,18 +439,27 @@ function commitLifeCycles(
           // but instead we rely on them being set during last render.
           // TODO: revisit this when we implement resuming.
           if (__DEV__) {
-            if (finishedWork.type === finishedWork.elementType) {
+            if (
+              finishedWork.type === finishedWork.elementType &&
+              !didWarnAboutReassigningProps
+            ) {
               warning(
                 instance.props === finishedWork.memoizedProps,
-                'Expected instance props to match memoized props before ' +
-                  'componentDidUpdate. This is likely due to a bug in React. ' +
+                'Expected %s props to match memoized props before ' +
+                  'componentDidUpdate. ' +
+                  'This might either be because of a bug in React, or because ' +
+                  'a component reassigns its own `this.props`. ' +
                   'Please file an issue.',
+                getComponentName(finishedWork.type) || 'instance',
               );
               warning(
                 instance.state === finishedWork.memoizedState,
-                'Expected instance state to match memoized state before ' +
-                  'componentDidUpdate. This is likely due to a bug in React. ' +
+                'Expected %s state to match memoized state before ' +
+                  'componentDidUpdate. ' +
+                  'This might either be because of a bug in React, or because ' +
+                  'a component reassigns its own `this.props`. ' +
                   'Please file an issue.',
+                getComponentName(finishedWork.type) || 'instance',
               );
             }
           }
@@ -424,18 +474,27 @@ function commitLifeCycles(
       const updateQueue = finishedWork.updateQueue;
       if (updateQueue !== null) {
         if (__DEV__) {
-          if (finishedWork.type === finishedWork.elementType) {
+          if (
+            finishedWork.type === finishedWork.elementType &&
+            !didWarnAboutReassigningProps
+          ) {
             warning(
               instance.props === finishedWork.memoizedProps,
-              'Expected instance props to match memoized props before ' +
-                'processing the update queue. This is likely due to a bug in React. ' +
+              'Expected %s props to match memoized props before ' +
+                'processing the update queue. ' +
+                'This might either be because of a bug in React, or because ' +
+                'a component reassigns its own `this.props`. ' +
                 'Please file an issue.',
+              getComponentName(finishedWork.type) || 'instance',
             );
             warning(
               instance.state === finishedWork.memoizedState,
-              'Expected instance state to match memoized state before ' +
-                'processing the update queue. This is likely due to a bug in React. ' +
+              'Expected %s state to match memoized state before ' +
+                'processing the update queue. ' +
+                'This might either be because of a bug in React, or because ' +
+                'a component reassigns its own `this.props`. ' +
                 'Please file an issue.',
+              getComponentName(finishedWork.type) || 'instance',
             );
           }
         }
@@ -525,7 +584,6 @@ function commitLifeCycles(
       return;
     }
     case SuspenseComponent:
-      break;
     case IncompleteClassComponent:
       break;
     default: {
@@ -540,7 +598,7 @@ function commitLifeCycles(
 
 function hideOrUnhideAllChildren(finishedWork, isHidden) {
   if (supportsMutation) {
-    // We only have the top Fiber that was inserted but we need recurse down its
+    // We only have the top Fiber that was inserted but we need to recurse down its
     // children to find all the terminal nodes.
     let node: Fiber = finishedWork;
     while (true) {
@@ -650,7 +708,7 @@ function commitUnmount(current: Fiber): void {
           let effect = firstEffect;
           do {
             const destroy = effect.destroy;
-            if (destroy !== null) {
+            if (destroy !== undefined) {
               safelyCallDestroy(current, destroy);
             }
             effect = effect.next;
@@ -728,9 +786,14 @@ function detachFiber(current: Fiber) {
   // itself will be GC:ed when the parent updates the next time.
   current.return = null;
   current.child = null;
-  if (current.alternate) {
-    current.alternate.child = null;
-    current.alternate.return = null;
+  current.memoizedState = null;
+  current.updateQueue = null;
+  const alternate = current.alternate;
+  if (alternate !== null) {
+    alternate.return = null;
+    alternate.child = null;
+    alternate.memoizedState = null;
+    alternate.updateQueue = null;
   }
 }
 
@@ -752,12 +815,8 @@ function commitContainer(finishedWork: Fiber) {
   }
 
   switch (finishedWork.tag) {
-    case ClassComponent: {
-      return;
-    }
-    case HostComponent: {
-      return;
-    }
+    case ClassComponent:
+    case HostComponent:
     case HostText: {
       return;
     }
@@ -823,7 +882,11 @@ function getHostSibling(fiber: Fiber): ?Instance {
     }
     node.sibling.return = node.return;
     node = node.sibling;
-    while (node.tag !== HostComponent && node.tag !== HostText) {
+    while (
+      node.tag !== HostComponent &&
+      node.tag !== HostText &&
+      node.tag !== DehydratedSuspenseComponent
+    ) {
       // If it is not host node and, we might have a host node inside it.
       // Try to search down until we find one.
       if (node.effectTag & Placement) {
@@ -887,7 +950,7 @@ function commitPlacement(finishedWork: Fiber): void {
   }
 
   const before = getHostSibling(finishedWork);
-  // We only have the top Fiber that was inserted but we need recurse down its
+  // We only have the top Fiber that was inserted but we need to recurse down its
   // children to find all the terminal nodes.
   let node: Fiber = finishedWork;
   while (true) {
@@ -929,7 +992,7 @@ function commitPlacement(finishedWork: Fiber): void {
 }
 
 function unmountHostComponents(current): void {
-  // We only have the top Fiber that was deleted but we need recurse down its
+  // We only have the top Fiber that was deleted but we need to recurse down its
   // children to find all the terminal nodes.
   let node: Fiber = current;
 
@@ -974,18 +1037,40 @@ function unmountHostComponents(current): void {
       // After all the children have unmounted, it is now safe to remove the
       // node from the tree.
       if (currentParentIsContainer) {
-        removeChildFromContainer((currentParent: any), node.stateNode);
+        removeChildFromContainer(
+          ((currentParent: any): Container),
+          (node.stateNode: Instance | TextInstance),
+        );
       } else {
-        removeChild((currentParent: any), node.stateNode);
+        removeChild(
+          ((currentParent: any): Instance),
+          (node.stateNode: Instance | TextInstance),
+        );
       }
       // Don't visit children because we already visited them.
+    } else if (
+      enableSuspenseServerRenderer &&
+      node.tag === DehydratedSuspenseComponent
+    ) {
+      // Delete the dehydrated suspense boundary and all of its content.
+      if (currentParentIsContainer) {
+        clearSuspenseBoundaryFromContainer(
+          ((currentParent: any): Container),
+          (node.stateNode: SuspenseInstance),
+        );
+      } else {
+        clearSuspenseBoundary(
+          ((currentParent: any): Instance),
+          (node.stateNode: SuspenseInstance),
+        );
+      }
     } else if (node.tag === HostPortal) {
-      // When we go into a portal, it becomes the parent to remove from.
-      // We will reassign it back when we pop the portal on the way up.
-      currentParent = node.stateNode.containerInfo;
-      currentParentIsContainer = true;
-      // Visit children because portals might contain host components.
       if (node.child !== null) {
+        // When we go into a portal, it becomes the parent to remove from.
+        // We will reassign it back when we pop the portal on the way up.
+        currentParent = node.stateNode.containerInfo;
+        currentParentIsContainer = true;
+        // Visit children because portals might contain host components.
         node.child.return = node;
         node = node.child;
         continue;
@@ -1037,7 +1122,16 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
       case ForwardRef:
       case MemoComponent:
       case SimpleMemoComponent: {
+        // Note: We currently never use MountMutation, but useLayout uses
+        // UnmountMutation.
         commitHookEffectList(UnmountMutation, MountMutation, finishedWork);
+        return;
+      }
+      case Profiler: {
+        return;
+      }
+      case SuspenseComponent: {
+        commitSuspenseComponent(finishedWork);
         return;
       }
     }
@@ -1051,6 +1145,8 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
     case ForwardRef:
     case MemoComponent:
     case SimpleMemoComponent: {
+      // Note: We currently never use MountMutation, but useLayout uses
+      // UnmountMutation.
       commitHookEffectList(UnmountMutation, MountMutation, finishedWork);
       return;
     }
@@ -1106,26 +1202,7 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
       return;
     }
     case SuspenseComponent: {
-      let newState: SuspenseState | null = finishedWork.memoizedState;
-
-      let newDidTimeout;
-      let primaryChildParent = finishedWork;
-      if (newState === null) {
-        newDidTimeout = false;
-      } else {
-        newDidTimeout = true;
-        primaryChildParent = finishedWork.child;
-        if (newState.timedOutAt === NoWork) {
-          // If the children had not already timed out, record the time.
-          // This is used to compute the elapsed time during subsequent
-          // attempts to render the children.
-          newState.timedOutAt = requestCurrentTime();
-        }
-      }
-
-      if (primaryChildParent !== null) {
-        hideOrUnhideAllChildren(primaryChildParent, newDidTimeout);
-      }
+      commitSuspenseComponent(finishedWork);
       return;
     }
     case IncompleteClassComponent: {
@@ -1138,6 +1215,52 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
           'likely caused by a bug in React. Please file an issue.',
       );
     }
+  }
+}
+
+function commitSuspenseComponent(finishedWork: Fiber) {
+  let newState: SuspenseState | null = finishedWork.memoizedState;
+
+  let newDidTimeout;
+  let primaryChildParent = finishedWork;
+  if (newState === null) {
+    newDidTimeout = false;
+  } else {
+    newDidTimeout = true;
+    primaryChildParent = finishedWork.child;
+    if (newState.timedOutAt === NoWork) {
+      // If the children had not already timed out, record the time.
+      // This is used to compute the elapsed time during subsequent
+      // attempts to render the children.
+      newState.timedOutAt = requestCurrentTime();
+    }
+  }
+
+  if (supportsMutation && primaryChildParent !== null) {
+    hideOrUnhideAllChildren(primaryChildParent, newDidTimeout);
+  }
+
+  // If this boundary just timed out, then it will have a set of thenables.
+  // For each thenable, attach a listener so that when it resolves, React
+  // attempts to re-render the boundary in the primary (pre-timeout) state.
+  const thenables: Set<Thenable> | null = (finishedWork.updateQueue: any);
+  if (thenables !== null) {
+    finishedWork.updateQueue = null;
+    let retryCache = finishedWork.stateNode;
+    if (retryCache === null) {
+      retryCache = finishedWork.stateNode = new PossiblyWeakSet();
+    }
+    thenables.forEach(thenable => {
+      // Memoize using the boundary fiber to prevent redundant listeners.
+      let retry = resolveRetryThenable.bind(null, finishedWork, thenable);
+      if (enableSchedulerTracing) {
+        retry = Schedule_tracing_wrap(retry);
+      }
+      if (!retryCache.has(thenable)) {
+        retryCache.add(thenable);
+        thenable.then(retry, retry);
+      }
+    });
   }
 }
 

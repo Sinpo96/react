@@ -10,10 +10,10 @@
 // UpdateQueue is a linked list of prioritized updates.
 //
 // Like fibers, update queues come in pairs: a current queue, which represents
-// the visible state of the screen, and a work-in-progress queue, which is
-// can be mutated and processed asynchronously before it is committed — a form
-// of double buffering. If a work-in-progress render is discarded before
-// finishing, we create a new work-in-progress by cloning the current queue.
+// the visible state of the screen, and a work-in-progress queue, which can be
+// mutated and processed asynchronously before it is committed — a form of
+// double buffering. If a work-in-progress render is discarded before finishing,
+// we create a new work-in-progress by cloning the current queue.
 //
 // Both queues share a persistent, singly-linked list structure. To schedule an
 // update, we append it to the end of both queues. Each queue maintains a
@@ -88,6 +88,10 @@ import type {Fiber} from './ReactFiber';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
 
 import {NoWork} from './ReactFiberExpirationTime';
+import {
+  enterDisallowedContextReadInDEV,
+  exitDisallowedContextReadInDEV,
+} from './ReactFiberNewContext';
 import {Callback, ShouldCapture, DidCapture} from 'shared/ReactSideEffectTags';
 import {ClassComponent} from 'shared/ReactWorkTags';
 
@@ -348,6 +352,7 @@ function getStateFromUpdate<State>(
       if (typeof payload === 'function') {
         // Updater function
         if (__DEV__) {
+          enterDisallowedContextReadInDEV();
           if (
             debugRenderPhaseSideEffects ||
             (debugRenderPhaseSideEffectsForStrictMode &&
@@ -356,7 +361,11 @@ function getStateFromUpdate<State>(
             payload.call(instance, prevState, nextProps);
           }
         }
-        return payload.call(instance, prevState, nextProps);
+        const nextState = payload.call(instance, prevState, nextProps);
+        if (__DEV__) {
+          exitDisallowedContextReadInDEV();
+        }
+        return nextState;
       }
       // State object
       return payload;
@@ -372,6 +381,7 @@ function getStateFromUpdate<State>(
       if (typeof payload === 'function') {
         // Updater function
         if (__DEV__) {
+          enterDisallowedContextReadInDEV();
           if (
             debugRenderPhaseSideEffects ||
             (debugRenderPhaseSideEffectsForStrictMode &&
@@ -381,6 +391,9 @@ function getStateFromUpdate<State>(
           }
         }
         partialState = payload.call(instance, prevState, nextProps);
+        if (__DEV__) {
+          exitDisallowedContextReadInDEV();
+        }
       } else {
         // Partial state object
         partialState = payload;
