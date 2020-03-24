@@ -9,7 +9,7 @@
 
 import type {ReactPriorityLevel} from './SchedulerWithReactIntegration';
 
-import MAX_SIGNED_31_BIT_INT from './maxSigned31BitInt';
+import {MAX_SIGNED_31_BIT_INT} from './MaxInts';
 
 import {
   ImmediatePriority,
@@ -21,15 +21,29 @@ import {
 export type ExpirationTime = number;
 
 export const NoWork = 0;
+// TODO: Think of a better name for Never. The key difference with Idle is that
+// Never work can be committed in an inconsistent state without tearing the UI.
+// The main example is offscreen content, like a hidden subtree. So one possible
+// name is Offscreen. However, it also includes dehydrated Suspense boundaries,
+// which are inconsistent in the sense that they haven't finished yet, but
+// aren't visibly inconsistent because the server rendered HTML matches what the
+// hydrated tree would look like.
 export const Never = 1;
+// Idle is slightly higher priority than Never. It must completely finish in
+// order to be consistent.
+export const Idle = 2;
+// Continuous Hydration is slightly higher than Idle and is used to increase
+// priority of hover targets.
+export const ContinuousHydration = 3;
 export const Sync = MAX_SIGNED_31_BIT_INT;
+export const Batched = Sync - 1;
 
 const UNIT_SIZE = 10;
-const MAGIC_NUMBER_OFFSET = MAX_SIGNED_31_BIT_INT - 1;
+const MAGIC_NUMBER_OFFSET = Batched - 1;
 
 // 1 unit of expiration time represents 10ms.
 export function msToExpirationTime(ms: number): ExpirationTime {
-  // Always add an offset so that we don't clash with the magic number for NoWork.
+  // Always subtract from the offset so that we don't clash with the magic number for NoWork.
   return MAGIC_NUMBER_OFFSET - ((ms / UNIT_SIZE) | 0);
 }
 
@@ -70,6 +84,18 @@ export function computeAsyncExpiration(
   );
 }
 
+export function computeSuspenseExpiration(
+  currentTime: ExpirationTime,
+  timeoutMs: number,
+): ExpirationTime {
+  // TODO: Should we warn if timeoutMs is lower than the normal pri expiration time?
+  return computeExpirationBucket(
+    currentTime,
+    timeoutMs,
+    LOW_PRIORITY_BATCH_SIZE,
+  );
+}
+
 // We intentionally set a higher expiration time for interactive updates in
 // dev than in production.
 //
@@ -99,18 +125,18 @@ export function inferPriorityFromExpirationTime(
   if (expirationTime === Sync) {
     return ImmediatePriority;
   }
-  if (expirationTime === Never) {
+  if (expirationTime === Never || expirationTime === Idle) {
     return IdlePriority;
   }
   const msUntil =
-    msToExpirationTime(expirationTime) - msToExpirationTime(currentTime);
+    expirationTimeToMs(expirationTime) - expirationTimeToMs(currentTime);
   if (msUntil <= 0) {
     return ImmediatePriority;
   }
-  if (msUntil <= HIGH_PRIORITY_EXPIRATION) {
+  if (msUntil <= HIGH_PRIORITY_EXPIRATION + HIGH_PRIORITY_BATCH_SIZE) {
     return UserBlockingPriority;
   }
-  if (msUntil <= LOW_PRIORITY_EXPIRATION) {
+  if (msUntil <= LOW_PRIORITY_EXPIRATION + LOW_PRIORITY_BATCH_SIZE) {
     return NormalPriority;
   }
 

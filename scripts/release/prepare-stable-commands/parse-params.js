@@ -3,6 +3,7 @@
 'use strict';
 
 const commandLineArgs = require('command-line-args');
+const {splitCommaParams} = require('../utils');
 
 const paramDefinitions = [
   {
@@ -13,6 +14,13 @@ const paramDefinitions = [
     defaultValue: false,
   },
   {
+    name: 'skipPackages',
+    type: String,
+    multiple: true,
+    description: 'Packages to exclude from publishing',
+    defaultValue: [],
+  },
+  {
     name: 'skipTests',
     type: Boolean,
     description: 'Skip automated fixture tests.',
@@ -21,12 +29,14 @@ const paramDefinitions = [
   {
     name: 'version',
     type: String,
-    description: 'Version of published canary release (e.g. 0.0.0-ddaf2b07c)',
+    description: 'Version of published "next" release (e.g. 0.0.0-ddaf2b07c)',
   },
 ];
 
 module.exports = () => {
   const params = commandLineArgs(paramDefinitions);
+
+  splitCommaParams(params.skipPackages);
 
   return params;
 };

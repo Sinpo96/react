@@ -5,8 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import checkPropTypes from 'prop-types/checkPropTypes';
+import checkPropTypes from 'shared/checkPropTypes';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
+import {enableDeprecatedFlareAPI} from 'shared/ReactFeatureFlags';
 
 let ReactDebugCurrentFrame = null;
 
@@ -34,7 +35,8 @@ if (__DEV__) {
         props.onChange ||
         props.readOnly ||
         props.disabled ||
-        props[propName] == null
+        props[propName] == null ||
+        (enableDeprecatedFlareAPI && props.DEPRECATED_flareListeners)
       ) {
         return null;
       }
@@ -50,7 +52,8 @@ if (__DEV__) {
         props.onChange ||
         props.readOnly ||
         props.disabled ||
-        props[propName] == null
+        props[propName] == null ||
+        (enableDeprecatedFlareAPI && props.DEPRECATED_flareListeners)
       ) {
         return null;
       }

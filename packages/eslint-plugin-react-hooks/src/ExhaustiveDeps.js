@@ -11,7 +11,6 @@
 
 export default {
   meta: {
-    fixable: 'code',
     schema: [
       {
         type: 'object',
@@ -81,7 +80,7 @@ export default {
       // Get the reactive hook node.
       const reactiveHook = node.parent.callee;
       const reactiveHookName = getNodeWithoutReactNamespace(reactiveHook).name;
-      const isEffect = reactiveHookName.endsWith('Effect');
+      const isEffect = /Effect($|[^a-z])/g.test(reactiveHookName);
 
       // Get the declared dependencies for this reactive hook. If there is no
       // second argument then the reactive callback will re-run on every render.
@@ -94,7 +93,7 @@ export default {
           reactiveHookName === 'useMemo' ||
           reactiveHookName === 'useCallback'
         ) {
-          // TODO: Can this have an autofix?
+          // TODO: Can this have a suggestion?
           context.report({
             node: node.parent.callee,
             message:
@@ -397,13 +396,19 @@ export default {
             });
           }
 
-          // Ignore references to the function itself as it's not defined yet.
           const def = reference.resolved.defs[0];
-          if (
-            def != null &&
-            def.node != null &&
-            def.node.init === node.parent
-          ) {
+
+          if (def == null) {
+            continue;
+          }
+
+          // Ignore references to the function itself as it's not defined yet.
+          if (def.node != null && def.node.init === node.parent) {
+            continue;
+          }
+
+          // Ignore Flow type parameters
+          if (def.type === 'TypeParameter') {
             continue;
           }
 
@@ -552,12 +557,19 @@ export default {
               `To fix this, pass [` +
               suggestedDependencies.join(', ') +
               `] as a second argument to the ${reactiveHookName} Hook.`,
-            fix(fixer) {
-              return fixer.insertTextAfter(
-                node,
-                `, [${suggestedDependencies.join(', ')}]`,
-              );
-            },
+            suggest: [
+              {
+                desc: `Add dependencies array: [${suggestedDependencies.join(
+                  ', ',
+                )}]`,
+                fix(fixer) {
+                  return fixer.insertTextAfter(
+                    node,
+                    `, [${suggestedDependencies.join(', ')}]`,
+                  );
+                },
+              },
+            ],
           });
         }
         return;
@@ -607,21 +619,15 @@ export default {
                   context.report({
                     node: declaredDependencyNode,
                     message:
-                      `The ${
-                        declaredDependencyNode.raw
-                      } literal is not a valid dependency ` +
+                      `The ${declaredDependencyNode.raw} literal is not a valid dependency ` +
                       `because it never changes. ` +
-                      `Did you mean to include ${
-                        declaredDependencyNode.value
-                      } in the array instead?`,
+                      `Did you mean to include ${declaredDependencyNode.value} in the array instead?`,
                   });
                 } else {
                   context.report({
                     node: declaredDependencyNode,
                     message:
-                      `The ${
-                        declaredDependencyNode.raw
-                      } literal is not a valid dependency ` +
+                      `The ${declaredDependencyNode.raw} literal is not a valid dependency ` +
                       'because it never changes. You can safely remove it.',
                   });
                 }
@@ -691,22 +697,38 @@ export default {
         bareFunctions.forEach(({fn, suggestUseCallback}) => {
           let message =
             `The '${fn.name.name}' function makes the dependencies of ` +
-            `${reactiveHookName} Hook (at line ${
-              declaredDependenciesNode.loc.start.line
-            }) ` +
+            `${reactiveHookName} Hook (at line ${declaredDependenciesNode.loc.start.line}) ` +
             `change on every render.`;
           if (suggestUseCallback) {
             message +=
               ` To fix this, ` +
-              `wrap the '${
-                fn.name.name
-              }' definition into its own useCallback() Hook.`;
+              `wrap the '${fn.name.name}' definition into its own useCallback() Hook.`;
           } else {
             message +=
               ` Move it inside the ${reactiveHookName} callback. ` +
-              `Alternatively, wrap the '${
-                fn.name.name
-              }' definition into its own useCallback() Hook.`;
+              `Alternatively, wrap the '${fn.name.name}' definition into its own useCallback() Hook.`;
+          }
+
+          let suggest;
+          // Only handle the simple case: arrow functions.
+          // Wrapping function declarations can mess up hoisting.
+          if (suggestUseCallback && fn.type === 'Variable') {
+            suggest = [
+              {
+                desc: `Wrap the '${fn.name.name}' definition into its own useCallback() Hook.`,
+                fix(fixer) {
+                  return [
+                    // TODO: also add an import?
+                    fixer.insertTextBefore(fn.node.init, 'useCallback('),
+                    // TODO: ideally we'd gather deps here but it would require
+                    // restructuring the rule code. This will cause a new lint
+                    // error to appear immediately for useCallback. Note we're
+                    // not adding [] because would that changes semantics.
+                    fixer.insertTextAfter(fn.node.init, ')'),
+                  ];
+                },
+              },
+            ];
           }
           // TODO: What if the function needs to change on every render anyway?
           // Should we suggest removing effect deps as an appropriate fix too?
@@ -714,21 +736,7 @@ export default {
             // TODO: Why not report this at the dependency site?
             node: fn.node,
             message,
-            fix(fixer) {
-              // Only handle the simple case: arrow functions.
-              // Wrapping function declarations can mess up hoisting.
-              if (suggestUseCallback && fn.type === 'Variable') {
-                return [
-                  // TODO: also add an import?
-                  fixer.insertTextBefore(fn.node.init, 'useCallback('),
-                  // TODO: ideally we'd gather deps here but it would require
-                  // restructuring the rule code. This will cause a new lint
-                  // error to appear immediately for useCallback. Note we're
-                  // not adding [] because would that changes semantics.
-                  fixer.insertTextAfter(fn.node.init, ')'),
-                ];
-              }
-            },
+            suggest,
           });
         });
         return;
@@ -1014,13 +1022,20 @@ export default {
               'omit',
             )) +
           extraWarning,
-        fix(fixer) {
-          // TODO: consider preserving the comments or formatting?
-          return fixer.replaceText(
-            declaredDependenciesNode,
-            `[${suggestedDependencies.join(', ')}]`,
-          );
-        },
+        suggest: [
+          {
+            desc: `Update the dependencies array to be: [${suggestedDependencies.join(
+              ', ',
+            )}]`,
+            fix(fixer) {
+              // TODO: consider preserving the comments or formatting?
+              return fixer.replaceText(
+                declaredDependenciesNode,
+                `[${suggestedDependencies.join(', ')}]`,
+              );
+            },
+          },
+        ],
       });
     }
   },
@@ -1144,7 +1159,7 @@ function collectRecommendations({
   let unnecessaryDependencies = new Set();
   let duplicateDependencies = new Set();
   declaredDependencies.forEach(({key}) => {
-    // Does this declared dep satsify a real need?
+    // Does this declared dep satisfy a real need?
     if (satisfyingDependencies.has(key)) {
       if (suggestedDependencies.indexOf(key) === -1) {
         // Good one.

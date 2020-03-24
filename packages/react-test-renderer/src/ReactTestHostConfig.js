@@ -7,12 +7,13 @@
  * @flow
  */
 
-import warning from 'shared/warning';
+import type {
+  ReactEventResponder,
+  ReactEventResponderInstance,
+  ReactFundamentalComponentInstance,
+} from 'shared/ReactTypes';
 
-import type {ReactEventResponder} from 'shared/ReactTypes';
-import {REACT_EVENT_TARGET_TOUCH_HIT} from 'shared/ReactSymbols';
-
-import {enableEventAPI} from 'shared/ReactFeatureFlags';
+import {enableDeprecatedFlareAPI} from 'shared/ReactFeatureFlags';
 
 export type Type = string;
 export type Props = Object;
@@ -26,6 +27,7 @@ export type Instance = {|
   props: Object,
   isHidden: boolean,
   children: Array<Instance | TextInstance>,
+  internalInstanceHandle: Object,
   rootContainerInstance: Container,
   tag: 'INSTANCE',
 |};
@@ -41,15 +43,20 @@ export type UpdatePayload = Object;
 export type ChildSet = void; // Unused
 export type TimeoutHandle = TimeoutID;
 export type NoTimeout = -1;
+export type EventResponder = any;
 
-export * from 'shared/HostConfigWithNoPersistence';
-export * from 'shared/HostConfigWithNoHydration';
+export type ReactListenerEvent = Object;
+export type ReactListenerMap = Object;
+export type ReactListener = Object;
+
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
 
 const EVENT_COMPONENT_CONTEXT = {};
-const EVENT_TARGET_CONTEXT = {};
-const EVENT_TOUCH_HIT_TARGET_CONTEXT = {};
 const NO_CONTEXT = {};
 const UPDATE_SIGNAL = {};
+const nodeToInstanceMap = new WeakMap();
+
 if (__DEV__) {
   Object.freeze(NO_CONTEXT);
   Object.freeze(UPDATE_SIGNAL);
@@ -59,10 +66,14 @@ export function getPublicInstance(inst: Instance | TextInstance): * {
   switch (inst.tag) {
     case 'INSTANCE':
       const createNodeMock = inst.rootContainerInstance.createNodeMock;
-      return createNodeMock({
+      const mockNode = createNodeMock({
         type: inst.type,
         props: inst.props,
       });
+      if (typeof mockNode === 'object' && mockNode !== null) {
+        nodeToInstanceMap.set(mockNode, inst);
+      }
+      return mockNode;
     default:
       return inst;
   }
@@ -73,13 +84,14 @@ export function appendChild(
   child: Instance | TextInstance,
 ): void {
   if (__DEV__) {
-    warning(
-      Array.isArray(parentInstance.children),
-      'An invalid container has been provided. ' +
-        'This may indicate that another renderer is being used in addition to the test renderer. ' +
-        '(For example, ReactDOM.createPortal inside of a ReactTestRenderer tree.) ' +
-        'This is not supported.',
-    );
+    if (!Array.isArray(parentInstance.children)) {
+      console.error(
+        'An invalid container has been provided. ' +
+          'This may indicate that another renderer is being used in addition to the test renderer. ' +
+          '(For example, ReactDOM.createPortal inside of a ReactTestRenderer tree.) ' +
+          'This is not supported.',
+      );
+    }
   }
   const index = parentInstance.children.indexOf(child);
   if (index !== -1) {
@@ -123,38 +135,6 @@ export function getChildHostContext(
   return NO_CONTEXT;
 }
 
-export function getChildHostContextForEventComponent(
-  parentHostContext: HostContext,
-): HostContext {
-  if (__DEV__ && enableEventAPI) {
-    warning(
-      parentHostContext !== EVENT_TARGET_CONTEXT &&
-        parentHostContext !== EVENT_TOUCH_HIT_TARGET_CONTEXT,
-      'validateDOMNesting: React event targets must not have event components as children.',
-    );
-    return EVENT_COMPONENT_CONTEXT;
-  }
-  return NO_CONTEXT;
-}
-
-export function getChildHostContextForEventTarget(
-  parentHostContext: HostContext,
-  type: Symbol | number,
-): HostContext {
-  if (__DEV__ && enableEventAPI) {
-    if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
-      warning(
-        parentHostContext !== EVENT_COMPONENT_CONTEXT,
-        'validateDOMNesting: <TouchHitTarget> cannot not be a direct child of an event component. ' +
-          'Ensure <TouchHitTarget> is a direct child of a DOM element.',
-      );
-      return EVENT_TOUCH_HIT_TARGET_CONTEXT;
-    }
-    return EVENT_TARGET_CONTEXT;
-  }
-  return NO_CONTEXT;
-}
-
 export function prepareForCommit(containerInfo: Container): void {
   // noop
 }
@@ -170,17 +150,22 @@ export function createInstance(
   hostContext: Object,
   internalInstanceHandle: Object,
 ): Instance {
-  if (__DEV__ && enableEventAPI) {
-    warning(
-      hostContext !== EVENT_TOUCH_HIT_TARGET_CONTEXT,
-      'validateDOMNesting: <TouchHitTarget> must not have any children.',
-    );
+  let propsToUse = props;
+  if (enableDeprecatedFlareAPI) {
+    if (props.DEPRECATED_flareListeners != null) {
+      // We want to remove the "DEPRECATED_flareListeners" prop
+      // as we don't want it in the test renderer's
+      // instance props.
+      const {DEPRECATED_flareListeners, ...otherProps} = props; // eslint-disable-line
+      propsToUse = otherProps;
+    }
   }
   return {
     type,
-    props,
+    props: propsToUse,
     isHidden: false,
     children: [],
+    internalInstanceHandle,
     rootContainerInstance,
     tag: 'INSTANCE',
   };
@@ -214,7 +199,7 @@ export function prepareUpdate(
   newProps: Props,
   rootContainerInstance: Container,
   hostContext: Object,
-): null | {} {
+): null | {...} {
   return UPDATE_SIGNAL;
 }
 
@@ -232,23 +217,16 @@ export function createTextInstance(
   hostContext: Object,
   internalInstanceHandle: Object,
 ): TextInstance {
-  if (__DEV__ && enableEventAPI) {
-    warning(
-      hostContext !== EVENT_TOUCH_HIT_TARGET_CONTEXT,
-      'validateDOMNesting: <TouchHitTarget> must not have any children.',
-    );
-    warning(
-      hostContext !== EVENT_COMPONENT_CONTEXT,
-      'validateDOMNesting: React event components cannot have text DOM nodes as children. ' +
-        'Wrap the child text "%s" in an element.',
-      text,
-    );
-    warning(
-      hostContext !== EVENT_TARGET_CONTEXT,
-      'validateDOMNesting: React event targets cannot have text DOM nodes as children. ' +
-        'Wrap the child text "%s" in an element.',
-      text,
-    );
+  if (__DEV__) {
+    if (enableDeprecatedFlareAPI) {
+      if (hostContext === EVENT_COMPONENT_CONTEXT) {
+        console.error(
+          'validateDOMNesting: React event components cannot have text DOM nodes as children. ' +
+            'Wrap the child text "%s" in an element.',
+          text,
+        );
+      }
+    }
   }
   return {
     text,
@@ -258,6 +236,7 @@ export function createTextInstance(
 }
 
 export const isPrimaryRenderer = false;
+export const warnsIfNotActing = true;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
@@ -271,7 +250,7 @@ export const supportsMutation = true;
 
 export function commitUpdate(
   instance: Instance,
-  updatePayload: {},
+  updatePayload: {...},
   type: string,
   oldProps: Props,
   newProps: Props,
@@ -325,21 +304,94 @@ export function unhideTextInstance(
   textInstance.isHidden = false;
 }
 
-export function handleEventComponent(
-  eventResponder: ReactEventResponder,
-  rootContainerInstance: Container,
-  internalInstanceHandle: Object,
+export function DEPRECATED_mountResponderInstance(
+  responder: ReactEventResponder<any, any>,
+  responderInstance: ReactEventResponderInstance<any, any>,
+  props: Object,
+  state: Object,
+  instance: Instance,
 ) {
-  // TODO: add handleEventComponent implementation
+  // noop
 }
 
-export function handleEventTarget(
-  type: Symbol | number,
-  props: Props,
-  parentInstance: Container,
-  internalInstanceHandle: Object,
-) {
-  if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
-    // TODO
+export function DEPRECATED_unmountResponderInstance(
+  responderInstance: ReactEventResponderInstance<any, any>,
+): void {
+  // noop
+}
+
+export function getFundamentalComponentInstance(
+  fundamentalInstance: ReactFundamentalComponentInstance<any, any>,
+): Instance {
+  const {impl, props, state} = fundamentalInstance;
+  return impl.getInstance(null, props, state);
+}
+
+export function mountFundamentalComponent(
+  fundamentalInstance: ReactFundamentalComponentInstance<any, any>,
+): void {
+  const {impl, instance, props, state} = fundamentalInstance;
+  const onMount = impl.onMount;
+  if (onMount !== undefined) {
+    onMount(null, instance, props, state);
   }
+}
+
+export function shouldUpdateFundamentalComponent(
+  fundamentalInstance: ReactFundamentalComponentInstance<any, any>,
+): boolean {
+  const {impl, prevProps, props, state} = fundamentalInstance;
+  const shouldUpdate = impl.shouldUpdate;
+  if (shouldUpdate !== undefined) {
+    return shouldUpdate(null, prevProps, props, state);
+  }
+  return true;
+}
+
+export function updateFundamentalComponent(
+  fundamentalInstance: ReactFundamentalComponentInstance<any, any>,
+): void {
+  const {impl, instance, prevProps, props, state} = fundamentalInstance;
+  const onUpdate = impl.onUpdate;
+  if (onUpdate !== undefined) {
+    onUpdate(null, instance, prevProps, props, state);
+  }
+}
+
+export function unmountFundamentalComponent(
+  fundamentalInstance: ReactFundamentalComponentInstance<any, any>,
+): void {
+  const {impl, instance, props, state} = fundamentalInstance;
+  const onUnmount = impl.onUnmount;
+  if (onUnmount !== undefined) {
+    onUnmount(null, instance, props, state);
+  }
+}
+
+export function getInstanceFromNode(mockNode: Object) {
+  const instance = nodeToInstanceMap.get(mockNode);
+  if (instance !== undefined) {
+    return instance.internalInstanceHandle;
+  }
+  return null;
+}
+
+export function beforeRemoveInstance(instance: any) {
+  // noop
+}
+
+export function registerEvent(event: any, rootContainerInstance: Container) {
+  throw new Error('Not yet implemented.');
+}
+
+export function mountEventListener(listener: any) {
+  throw new Error('Not yet implemented.');
+}
+
+export function unmountEventListener(listener: any) {
+  throw new Error('Not yet implemented.');
+}
+
+export function validateEventListenerTarget(target: any, listener: any) {
+  throw new Error('Not yet implemented.');
 }

@@ -23,7 +23,23 @@ module.exports = {
     module: true,
     define: true,
     require: true,
+    globalThis: true,
     global: true,
+    // Trusted Types
+    trustedTypes: true,
+
+    // Scheduler profiling
+    SharedArrayBuffer: true,
+    Int32Array: true,
+    ArrayBuffer: true,
+
+    // Flight
+    Uint8Array: true,
+    Promise: true,
+
+    // Flight Webpack
+    __webpack_chunk_load__: true,
+    __webpack_require__: true,
   },
   parserOptions: {
     ecmaVersion: 5,
@@ -33,4 +49,9 @@ module.exports = {
     'no-undef': 'error',
     'no-shadow-restricted-names': 'error',
   },
+
+  // These plugins aren't used, but eslint complains if an eslint-ignore comment
+  // references unused plugins. An alternate approach could be to strip
+  // eslint-ignore comments as part of the build.
+  plugins: ['jest', 'no-for-of-loops', 'react', 'react-internal'],
 };

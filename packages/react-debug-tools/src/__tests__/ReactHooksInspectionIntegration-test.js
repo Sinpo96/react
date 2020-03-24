@@ -146,7 +146,10 @@ describe('ReactHooksInspectionIntegration', () => {
         </div>
       );
     }
-    let renderer = ReactTestRenderer.create(<Foo prop="prop" />);
+    let renderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(<Foo prop="prop" />);
+    });
 
     let childFiber = renderer.root.findByType(Foo)._currentFiber();
 
@@ -362,6 +365,64 @@ describe('ReactHooksInspectionIntegration', () => {
       },
     ]);
   });
+
+  if (__EXPERIMENTAL__) {
+    it('should support composite useTransition hook', () => {
+      function Foo(props) {
+        React.useTransition();
+        const memoizedValue = React.useMemo(() => 'hello', []);
+        return <div>{memoizedValue}</div>;
+      }
+      let renderer = ReactTestRenderer.create(<Foo />);
+      let childFiber = renderer.root.findByType(Foo)._currentFiber();
+      let tree = ReactDebugTools.inspectHooksOfFiber(childFiber);
+      expect(tree).toEqual([
+        {
+          id: 0,
+          isStateEditable: false,
+          name: 'Transition',
+          value: undefined,
+          subHooks: [],
+        },
+        {
+          id: 1,
+          isStateEditable: false,
+          name: 'Memo',
+          value: 'hello',
+          subHooks: [],
+        },
+      ]);
+    });
+
+    it('should support composite useDeferredValue hook', () => {
+      function Foo(props) {
+        React.useDeferredValue('abc', {
+          timeoutMs: 500,
+        });
+        const [state] = React.useState(() => 'hello', []);
+        return <div>{state}</div>;
+      }
+      let renderer = ReactTestRenderer.create(<Foo />);
+      let childFiber = renderer.root.findByType(Foo)._currentFiber();
+      let tree = ReactDebugTools.inspectHooksOfFiber(childFiber);
+      expect(tree).toEqual([
+        {
+          id: 0,
+          isStateEditable: false,
+          name: 'DeferredValue',
+          value: 'abc',
+          subHooks: [],
+        },
+        {
+          id: 1,
+          isStateEditable: true,
+          name: 'State',
+          value: 'hello',
+          subHooks: [],
+        },
+      ]);
+    });
+  }
 
   describe('useDebugValue', () => {
     it('should support inspectable values for multiple custom hooks', () => {
@@ -620,7 +681,7 @@ describe('ReactHooksInspectionIntegration', () => {
 
     await LazyFoo;
 
-    Scheduler.flushAll();
+    Scheduler.unstable_flushAll();
 
     let childFiber = renderer.root._currentFiber();
     let tree = ReactDebugTools.inspectHooksOfFiber(childFiber);
@@ -724,4 +785,38 @@ describe('ReactHooksInspectionIntegration', () => {
       },
     ]);
   });
+
+  if (__EXPERIMENTAL__) {
+    it('should support composite useMutableSource hook', () => {
+      const mutableSource = React.createMutableSource({}, () => 1);
+      function Foo(props) {
+        React.useMutableSource(
+          mutableSource,
+          () => 'snapshot',
+          () => {},
+        );
+        React.useMemo(() => 'memo', []);
+        return <div />;
+      }
+      let renderer = ReactTestRenderer.create(<Foo />);
+      let childFiber = renderer.root.findByType(Foo)._currentFiber();
+      let tree = ReactDebugTools.inspectHooksOfFiber(childFiber);
+      expect(tree).toEqual([
+        {
+          id: 0,
+          isStateEditable: false,
+          name: 'MutableSource',
+          value: 'snapshot',
+          subHooks: [],
+        },
+        {
+          id: 1,
+          isStateEditable: false,
+          name: 'Memo',
+          value: 'memo',
+          subHooks: [],
+        },
+      ]);
+    });
+  }
 });
