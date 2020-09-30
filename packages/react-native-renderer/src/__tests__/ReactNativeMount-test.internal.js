@@ -481,9 +481,8 @@ describe('ReactNative', () => {
         'findHostInstance_DEPRECATED was passed an instance of ContainsStrictModeChild which renders StrictMode children. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://reactjs.org/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in StrictMode (at **)' +
         '\n    in ContainsStrictModeChild (at **)',
     ]);
     expect(match).toBe(child);
@@ -519,10 +518,9 @@ describe('ReactNative', () => {
         'findHostInstance_DEPRECATED was passed an instance of IsInStrictMode which is inside StrictMode. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://reactjs.org/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in IsInStrictMode (at **)' +
-        '\n    in StrictMode (at **)',
+        '\n    in IsInStrictMode (at **)',
     ]);
     expect(match).toBe(child);
   });
@@ -554,9 +552,8 @@ describe('ReactNative', () => {
         'findNodeHandle was passed an instance of ContainsStrictModeChild which renders StrictMode children. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://reactjs.org/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in StrictMode (at **)' +
         '\n    in ContainsStrictModeChild (at **)',
     ]);
     expect(match).toBe(child._nativeTag);
@@ -590,10 +587,9 @@ describe('ReactNative', () => {
         'findNodeHandle was passed an instance of IsInStrictMode which is inside StrictMode. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://reactjs.org/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in IsInStrictMode (at **)' +
-        '\n    in StrictMode (at **)',
+        '\n    in IsInStrictMode (at **)',
     ]);
     expect(match).toBe(child._nativeTag);
   });
@@ -604,7 +600,7 @@ describe('ReactNative', () => {
       uiViewClassName: 'RCTView',
     }));
 
-    let viewRef = React.createRef();
+    const viewRef = React.createRef();
     ReactNative.render(<View ref={viewRef} />, 11);
 
     expect(TextInputState.blurTextInput).not.toBeCalled();
@@ -621,7 +617,7 @@ describe('ReactNative', () => {
       uiViewClassName: 'RCTView',
     }));
 
-    let viewRef = React.createRef();
+    const viewRef = React.createRef();
     ReactNative.render(<View ref={viewRef} />, 11);
 
     expect(TextInputState.focusTextInput).not.toBeCalled();

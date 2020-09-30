@@ -19,7 +19,7 @@ const DEVTOOLS_VERSION = getVersionString();
 
 module.exports = {
   mode: __DEV__ ? 'development' : 'production',
-  devtool: __DEV__ ? 'cheap-module-eval-source-map' : false,
+  devtool: __DEV__ ? 'cheap-module-eval-source-map' : 'source-map',
   target: 'electron-main',
   entry: {
     standalone: './src/standalone.js',
@@ -48,6 +48,8 @@ module.exports = {
   plugins: [
     new DefinePlugin({
       __DEV__: false,
+      __PROFILE__: false,
+      __EXPERIMENTAL__: true,
       'process.env.DEVTOOLS_VERSION': `"${DEVTOOLS_VERSION}"`,
       'process.env.GITHUB_URL': `"${GITHUB_URL}"`,
       'process.env.NODE_ENV': `"${NODE_ENV}"`,

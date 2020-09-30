@@ -14,12 +14,8 @@ let React;
 let ReactDOMServer;
 let PropTypes;
 let ReactCurrentDispatcher;
-let enableSuspenseServerRenderer = require('shared/ReactFeatureFlags')
+const enableSuspenseServerRenderer = require('shared/ReactFeatureFlags')
   .enableSuspenseServerRenderer;
-
-function normalizeCodeLocInfo(str) {
-  return str && str.replace(/\(at .+?:\d+\)/g, '(at **)');
-}
 
 describe('ReactDOMServer', () => {
   beforeEach(() => {
@@ -167,17 +163,11 @@ describe('ReactDOMServer', () => {
     });
 
     it('should throw prop mapping error for an <iframe /> with invalid props', () => {
-      let caughtErr;
-      try {
+      expect(() => {
         ReactDOMServer.renderToString(<iframe style="border:none;" />);
-      } catch (err) {
-        caughtErr = err;
-      }
-      expect(caughtErr).not.toBe(undefined);
-      expect(normalizeCodeLocInfo(caughtErr.message)).toContain(
+      }).toThrowError(
         'The `style` prop expects a mapping from style properties to values, not ' +
-          "a string. For example, style={{marginRight: spacing + 'em'}} when using JSX." +
-          (__DEV__ ? '\n    in iframe (at **)' : ''),
+          "a string. For example, style={{marginRight: spacing + 'em'}} when using JSX.",
       );
     });
 

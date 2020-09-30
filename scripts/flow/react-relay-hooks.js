@@ -17,6 +17,7 @@ type JSONValue =
 
 declare module 'ReactFlightDOMRelayServerIntegration' {
   declare export opaque type Destination;
+  declare export opaque type BundlerConfig;
   declare export function emitModel(
     destination: Destination,
     id: number,
@@ -30,10 +31,11 @@ declare module 'ReactFlightDOMRelayServerIntegration' {
   ): void;
   declare export function close(destination: Destination): void;
 
-  declare export opaque type ModuleReference;
+  declare export opaque type ModuleReference<T>;
   declare export type ModuleMetaData = JSONValue;
-  declare export function resolveModuleMetaData(
-    resourceReference: ModuleReference,
+  declare export function resolveModuleMetaData<T>(
+    config: BundlerConfig,
+    resourceReference: ModuleReference<T>,
   ): ModuleMetaData;
 }
 

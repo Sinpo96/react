@@ -27,11 +27,14 @@ export {
   useRef,
   useState,
   useMutableSource,
+  useMutableSource as unstable_useMutableSource,
   createMutableSource,
+  createMutableSource as unstable_createMutableSource,
   Fragment,
   Profiler,
   StrictMode,
   Suspense,
+  unstable_LegacyHidden,
   createElement,
   cloneElement,
   isValidElement,
@@ -40,15 +43,20 @@ export {
   createFactory,
   // exposeConcurrentModeAPIs
   useTransition,
+  useTransition as unstable_useTransition,
   useDeferredValue,
+  useDeferredValue as unstable_useDeferredValue,
+  startTransition,
+  startTransition as unstable_startTransition,
   SuspenseList,
-  unstable_withSuspenseConfig,
+  SuspenseList as unstable_SuspenseList,
   // enableBlocksAPI
   block,
-  // enableDeprecatedFlareAPI
-  DEPRECATED_useResponder,
-  DEPRECATED_createResponder,
+  block as unstable_block,
   // enableScopeAPI
-  unstable_createScope,
+  unstable_Scope,
+  unstable_useOpaqueIdentifier,
+  // enableDebugTracing
+  unstable_DebugTracingMode,
 } from './src/React';
 export {jsx, jsxs, jsxDEV} from './src/jsx/ReactJSX';

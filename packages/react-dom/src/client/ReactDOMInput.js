@@ -14,8 +14,9 @@ import invariant from 'shared/invariant';
 import {setValueForProperty} from './DOMPropertyOperations';
 import {getFiberCurrentPropsFromNode} from './ReactDOMComponentTree';
 import {getToStringValue, toString} from './ToStringValue';
-import ReactControlledValuePropTypes from '../shared/ReactControlledValuePropTypes';
+import {checkControlledValueProps} from '../shared/ReactControlledValuePropTypes';
 import {updateValueIfChanged} from './inputValueTracking';
+import getActiveElement from './getActiveElement';
 import {disableInputAttributeSyncing} from 'shared/ReactFeatureFlags';
 
 import type {ToStringValue} from './ToStringValue';
@@ -73,7 +74,7 @@ export function getHostProps(element: Element, props: Object) {
 
 export function initWrapperState(element: Element, props: Object) {
   if (__DEV__) {
-    ReactControlledValuePropTypes.checkPropTypes('input', props);
+    checkControlledValueProps('input', props);
 
     if (
       props.checked !== undefined &&
@@ -86,7 +87,7 @@ export function initWrapperState(element: Element, props: Object) {
           '(specify either the checked prop, or the defaultChecked prop, but not ' +
           'both). Decide between using a controlled or uncontrolled input ' +
           'element and remove one of these props. More info: ' +
-          'https://fb.me/react-controlled-components',
+          'https://reactjs.org/link/controlled-components',
         getCurrentFiberOwnerNameInDevOrNull() || 'A component',
         props.type,
       );
@@ -103,7 +104,7 @@ export function initWrapperState(element: Element, props: Object) {
           '(specify either the value prop, or the defaultValue prop, but not ' +
           'both). Decide between using a controlled or uncontrolled input ' +
           'element and remove one of these props. More info: ' +
-          'https://fb.me/react-controlled-components',
+          'https://reactjs.org/link/controlled-components',
         getCurrentFiberOwnerNameInDevOrNull() || 'A component',
         props.type,
       );
@@ -143,11 +144,11 @@ export function updateWrapper(element: Element, props: Object) {
       !didWarnUncontrolledToControlled
     ) {
       console.error(
-        'A component is changing an uncontrolled input of type %s to be controlled. ' +
-          'Input elements should not switch from uncontrolled to controlled (or vice versa). ' +
+        'A component is changing an uncontrolled input to be controlled. ' +
+          'This is likely caused by the value changing from undefined to ' +
+          'a defined value, which should not happen. ' +
           'Decide between using a controlled or uncontrolled input ' +
-          'element for the lifetime of the component. More info: https://fb.me/react-controlled-components',
-        props.type,
+          'element for the lifetime of the component. More info: https://reactjs.org/link/controlled-components',
       );
       didWarnUncontrolledToControlled = true;
     }
@@ -157,11 +158,11 @@ export function updateWrapper(element: Element, props: Object) {
       !didWarnControlledToUncontrolled
     ) {
       console.error(
-        'A component is changing a controlled input of type %s to be uncontrolled. ' +
-          'Input elements should not switch from controlled to uncontrolled (or vice versa). ' +
+        'A component is changing a controlled input to be uncontrolled. ' +
+          'This is likely caused by the value changing from a defined to ' +
+          'undefined, which should not happen. ' +
           'Decide between using a controlled or uncontrolled input ' +
-          'element for the lifetime of the component. More info: https://fb.me/react-controlled-components',
-        props.type,
+          'element for the lifetime of the component. More info: https://reactjs.org/link/controlled-components',
       );
       didWarnControlledToUncontrolled = true;
     }
@@ -412,7 +413,7 @@ export function setDefaultValue(
   if (
     // Focused number inputs synchronize on blur. See ChangeEventPlugin.js
     type !== 'number' ||
-    node.ownerDocument.activeElement !== node
+    getActiveElement(node.ownerDocument) !== node
   ) {
     if (value == null) {
       node.defaultValue = toString(node._wrapperState.initialValue);

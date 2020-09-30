@@ -14,7 +14,7 @@ import type {DehydratedData} from 'react-devtools-shared/src/devtools/views/Comp
 
 export function cleanForBridge(
   data: Object | null,
-  isPathWhitelisted: (path: Array<string | number>) => boolean,
+  isPathAllowed: (path: Array<string | number>) => boolean,
   path?: Array<string | number> = [],
 ): DehydratedData | null {
   if (data !== null) {
@@ -25,7 +25,7 @@ export function cleanForBridge(
       cleanedPaths,
       unserializablePaths,
       path,
-      isPathWhitelisted,
+      isPathAllowed,
     );
 
     return {
@@ -53,6 +53,52 @@ export function copyToClipboard(value: any): void {
   } else {
     copy(text);
   }
+}
+
+export function copyWithDelete(
+  obj: Object | Array<any>,
+  path: Array<string | number>,
+  index: number = 0,
+): Object | Array<any> {
+  const key = path[index];
+  const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+  if (index + 1 === path.length) {
+    if (Array.isArray(updated)) {
+      updated.splice(((key: any): number), 1);
+    } else {
+      delete updated[key];
+    }
+  } else {
+    // $FlowFixMe number or string is fine here
+    updated[key] = copyWithDelete(obj[key], path, index + 1);
+  }
+  return updated;
+}
+
+// This function expects paths to be the same except for the final value.
+// e.g. ['path', 'to', 'foo'] and ['path', 'to', 'bar']
+export function copyWithRename(
+  obj: Object | Array<any>,
+  oldPath: Array<string | number>,
+  newPath: Array<string | number>,
+  index: number = 0,
+): Object | Array<any> {
+  const oldKey = oldPath[index];
+  const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+  if (index + 1 === oldPath.length) {
+    const newKey = newPath[index];
+    // $FlowFixMe number or string is fine here
+    updated[newKey] = updated[oldKey];
+    if (Array.isArray(updated)) {
+      updated.splice(((oldKey: any): number), 1);
+    } else {
+      delete updated[oldKey];
+    }
+  } else {
+    // $FlowFixMe number or string is fine here
+    updated[oldKey] = copyWithRename(obj[oldKey], oldPath, newPath, index + 1);
+  }
+  return updated;
 }
 
 export function copyWithSet(

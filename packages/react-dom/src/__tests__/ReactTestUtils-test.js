@@ -31,10 +31,6 @@ describe('ReactTestUtils', () => {
     expect(Object.keys(ReactTestUtils.Simulate).sort()).toMatchSnapshot();
   });
 
-  it('SimulateNative should have locally attached media events', () => {
-    expect(Object.keys(ReactTestUtils.SimulateNative).sort()).toMatchSnapshot();
-  });
-
   it('gives Jest mocks a passthrough implementation with mockComponent()', () => {
     class MockedComponent extends React.Component {
       render() {
@@ -50,7 +46,7 @@ describe('ReactTestUtils', () => {
     ).toWarnDev(
       'ReactTestUtils.mockComponent() is deprecated. ' +
         'Use shallow rendering or jest.mock() instead.\n\n' +
-        'See https://fb.me/test-utils-mock-component for more information.',
+        'See https://reactjs.org/link/test-utils-mock-component for more information.',
       {withoutStack: true},
     );
 

@@ -16,7 +16,13 @@ module.exports = {
   // Stop ESLint from looking for a configuration file in parent folders
   root: true,
 
-  plugins: ['jest', 'no-for-of-loops', 'react', 'react-internal'],
+  plugins: [
+    'jest',
+    'no-for-of-loops',
+    'no-function-declare-after-return',
+    'react',
+    'react-internal',
+  ],
 
   parser: 'babel-eslint',
   parserOptions: {
@@ -91,6 +97,9 @@ module.exports = {
     // You can disable this rule for code that isn't shipped (e.g. build scripts and tests).
     'no-for-of-loops/no-for-of-loops': ERROR,
 
+    // Prevent function declarations after return statements
+    'no-function-declare-after-return/no-function-declare-after-return': ERROR,
+
     // CUSTOM RULES
     // the second argument of warning/invariant should be a literal string
     'react-internal/no-primitive-constructors': ERROR,
@@ -98,6 +107,19 @@ module.exports = {
     'react-internal/invariant-args': ERROR,
     'react-internal/warning-args': ERROR,
     'react-internal/no-production-logging': ERROR,
+    'react-internal/no-cross-fork-imports': ERROR,
+    'react-internal/no-cross-fork-types': [
+      ERROR,
+      {
+        old: [
+          'firstEffect',
+          'nextEffect',
+          // Disabled because it's also used by the Hook type.
+          // 'lastEffect',
+        ],
+        new: ['subtreeFlags'],
+      },
+    ],
   },
 
   overrides: [
@@ -126,6 +148,7 @@ module.exports = {
       },
       rules: {
         'no-var': ERROR,
+        'prefer-const': ERROR,
         strict: OFF,
       },
     },
@@ -158,10 +181,16 @@ module.exports = {
       },
     },
     {
-      files: ['packages/react-flight-dom-webpack/**/*.js'],
+      files: ['packages/react-transport-dom-webpack/**/*.js'],
       globals: {
-        '__webpack_chunk_load__': true,
-        '__webpack_require__': true,
+        __webpack_chunk_load__: true,
+        __webpack_require__: true,
+      },
+    },
+    {
+      files: ['packages/scheduler/**/*.js'],
+      globals: {
+        TaskController: true,
       },
     },
   ],
@@ -176,6 +205,7 @@ module.exports = {
     __UMD__: true,
     __EXPERIMENTAL__: true,
     __VARIANT__: true,
+    gate: true,
     trustedTypes: true,
   },
 };

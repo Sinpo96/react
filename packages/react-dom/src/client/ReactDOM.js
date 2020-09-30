@@ -11,7 +11,6 @@ import type {ReactNodeList} from 'shared/ReactTypes';
 import type {Container} from './ReactDOMHostConfig';
 
 import '../shared/checkReact';
-import './ReactDOMClientInjection';
 import {
   findDOMNode,
   render,
@@ -20,7 +19,7 @@ import {
   unmountComponentAtNode,
 } from './ReactDOMLegacy';
 import {createRoot, createBlockingRoot, isValidContainer} from './ReactDOMRoot';
-import {useEvent} from './ReactDOMUseEvent';
+import {createEventHandle} from './ReactDOMEventHandle';
 
 import {
   batchedEventUpdates,
@@ -36,23 +35,17 @@ import {
   attemptUserBlockingHydration,
   attemptContinuousHydration,
   attemptHydrationAtCurrentPriority,
+  runWithPriority,
+  getCurrentUpdateLanePriority,
 } from 'react-reconciler/src/ReactFiberReconciler';
 import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
 import {canUseDOM} from 'shared/ExecutionEnvironment';
-import {setBatchingImplementation} from 'legacy-events/ReactGenericBatching';
-import {
-  setRestoreImplementation,
-  enqueueStateRestore,
-  restoreStateIfNeeded,
-} from 'legacy-events/ReactControlledComponent';
-import {runEventsInBatch} from 'legacy-events/EventBatching';
-import {
-  eventNameDispatchConfigs,
-  injectEventPluginsByName,
-} from 'legacy-events/EventPluginRegistry';
 import ReactVersion from 'shared/ReactVersion';
 import invariant from 'shared/invariant';
-import {warnUnstableRenderSubtreeIntoContainer} from 'shared/ReactFeatureFlags';
+import {
+  warnUnstableRenderSubtreeIntoContainer,
+  enableNewReconciler,
+} from 'shared/ReactFeatureFlags';
 
 import {
   getInstanceFromNode,
@@ -61,19 +54,28 @@ import {
   getClosestInstanceFromNode,
 } from './ReactDOMComponentTree';
 import {restoreControlledState} from './ReactDOMComponent';
-import {dispatchEvent} from '../events/ReactDOMEventListener';
 import {
   setAttemptSynchronousHydration,
   setAttemptUserBlockingHydration,
   setAttemptContinuousHydration,
   setAttemptHydrationAtCurrentPriority,
   queueExplicitHydrationTarget,
+  setGetCurrentUpdatePriority,
+  setAttemptHydrationAtPriority,
 } from '../events/ReactDOMEventReplaying';
+import {setBatchingImplementation} from '../events/ReactDOMUpdateBatching';
+import {
+  setRestoreImplementation,
+  enqueueStateRestore,
+  restoreStateIfNeeded,
+} from '../events/ReactDOMControlledComponent';
 
 setAttemptSynchronousHydration(attemptSynchronousHydration);
 setAttemptUserBlockingHydration(attemptUserBlockingHydration);
 setAttemptContinuousHydration(attemptContinuousHydration);
 setAttemptHydrationAtCurrentPriority(attemptHydrationAtCurrentPriority);
+setGetCurrentUpdatePriority(getCurrentUpdateLanePriority);
+setAttemptHydrationAtPriority(runWithPriority);
 
 let didWarnAboutUnstableCreatePortal = false;
 let didWarnAboutUnstableRenderSubtreeIntoContainer = false;
@@ -92,7 +94,7 @@ if (__DEV__) {
   ) {
     console.error(
       'React depends on Map and Set built-in types. Make sure that you load a ' +
-        'polyfill in older browsers. https://fb.me/react-polyfills',
+        'polyfill in older browsers. https://reactjs.org/link/react-polyfills',
     );
   }
 }
@@ -162,7 +164,7 @@ function unstable_createPortal(
       didWarnAboutUnstableCreatePortal = true;
       console.warn(
         'The ReactDOM.unstable_createPortal() alias has been deprecated, ' +
-          'and will be removed in React 17+. Update your code to use ' +
+          'and will be removed in React 18+. Update your code to use ' +
           'ReactDOM.createPortal() instead. It has the exact same API, ' +
           'but without the "unstable_" prefix.',
       );
@@ -172,19 +174,16 @@ function unstable_createPortal(
 }
 
 const Internals = {
-  // Keep in sync with ReactDOMUnstableNativeDependencies.js
-  // ReactTestUtils.js, and ReactTestUtilsAct.js. This is an array for better minification.
+  // Keep in sync with ReactTestUtils.js, and ReactTestUtilsAct.js.
+  // This is an array for better minification.
   Events: [
     getInstanceFromNode,
     getNodeFromInstance,
     getFiberCurrentPropsFromNode,
-    injectEventPluginsByName,
-    eventNameDispatchConfigs,
     enqueueStateRestore,
     restoreStateIfNeeded,
-    dispatchEvent,
-    runEventsInBatch,
     flushPassiveEffects,
+    // TODO: This is related to `act`, not events. Move to separate key?
     IsThisRendererActing,
   ],
 };
@@ -203,18 +202,19 @@ export {
   // exposeConcurrentModeAPIs
   createRoot,
   createBlockingRoot,
-  discreteUpdates as unstable_discreteUpdates,
-  flushDiscreteUpdates as unstable_flushDiscreteUpdates,
   flushControlled as unstable_flushControlled,
   scheduleHydration as unstable_scheduleHydration,
   // Disabled behind disableUnstableRenderSubtreeIntoContainer
   renderSubtreeIntoContainer as unstable_renderSubtreeIntoContainer,
   // Disabled behind disableUnstableCreatePortal
   // Temporary alias since we already shipped React 16 RC with it.
-  // TODO: remove in React 17.
+  // TODO: remove in React 18.
   unstable_createPortal,
-  // enableUseEventAPI
-  useEvent as unstable_useEvent,
+  // enableCreateEventHandleAPI
+  createEventHandle as unstable_createEventHandle,
+  // TODO: Remove this once callers migrate to alternatives.
+  // This should only be used by React internals.
+  runWithPriority as unstable_runWithPriority,
 };
 
 const foundDevTools = injectIntoDevTools({
@@ -239,10 +239,10 @@ if (__DEV__) {
         console.info(
           '%cDownload the React DevTools ' +
             'for a better development experience: ' +
-            'https://fb.me/react-devtools' +
+            'https://reactjs.org/link/react-devtools' +
             (protocol === 'file:'
               ? '\nYou might need to use a local HTTP server (instead of file://): ' +
-                'https://fb.me/react-devtools-faq'
+                'https://reactjs.org/link/react-devtools-faq'
               : ''),
           'font-weight:bold',
         );
@@ -250,3 +250,5 @@ if (__DEV__) {
     }
   }
 }
+
+export const unstable_isNewReconciler = enableNewReconciler;

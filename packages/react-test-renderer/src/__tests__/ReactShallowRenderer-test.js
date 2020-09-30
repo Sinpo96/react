@@ -930,7 +930,7 @@ describe('ReactShallowRenderer', () => {
     let result = shallowRenderer.render(<SimpleComponent />);
     expect(result).toEqual(<div>value:0</div>);
 
-    let instance = shallowRenderer.getMountedInstance();
+    const instance = shallowRenderer.getMountedInstance();
     instance.updateState();
     result = shallowRenderer.getRenderOutput();
     expect(result).toEqual(<div>value:1</div>);
@@ -1170,7 +1170,7 @@ describe('ReactShallowRenderer', () => {
     }
 
     const shallowRenderer = createRenderer();
-    let result = shallowRenderer.render(<SimpleComponent />, {
+    const result = shallowRenderer.render(<SimpleComponent />, {
       foo: 'foo',
       bar: 'bar',
     });
@@ -1497,7 +1497,7 @@ describe('ReactShallowRenderer', () => {
     const shallowRenderer = createRenderer();
     shallowRenderer.render(<Foo foo={1} bar={1} />);
     expect(renderCount).toBe(1);
-    // Change a prop that the comparison funciton ignores
+    // Change a prop that the comparison function ignores
     shallowRenderer.render(<Foo foo={1} bar={2} />);
     expect(renderCount).toBe(1);
     shallowRenderer.render(<Foo foo={2} bar={2} />);

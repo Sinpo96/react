@@ -21,6 +21,25 @@ export function installHook(target: any): DevToolsHook | null {
     return null;
   }
 
+  function getMainWindow(targetWindow: any): any {
+    if (!canAccessParentWindow(targetWindow) || isMainWindow(targetWindow)) {
+      return targetWindow;
+    }
+    return getMainWindow(targetWindow.parent);
+  }
+
+  function isMainWindow(targetWindow: any): boolean {
+    return targetWindow.self === targetWindow.top;
+  }
+
+  function canAccessParentWindow(targetWindow: any): boolean {
+    try {
+      return !!targetWindow.parent.origin;
+    } catch (error) {
+      return false;
+    }
+  }
+
   function detectReactBuildType(renderer) {
     try {
       if (typeof renderer.version === 'string') {
@@ -145,7 +164,7 @@ export function installHook(target: any): DevToolsHook | null {
             'React is running in production mode, but dead code ' +
               'elimination has not been applied. Read how to correctly ' +
               'configure React for production: ' +
-              'https://fb.me/react-perf-use-the-production-build',
+              'https://reactjs.org/link/perf-use-production-build',
           );
         });
       }
@@ -174,6 +193,11 @@ export function installHook(target: any): DevToolsHook | null {
     // Don't patch in test environments because we don't want to interfere with Jest's own console overrides.
     if (process.env.NODE_ENV !== 'test') {
       try {
+        const appendComponentStack =
+          window.__REACT_DEVTOOLS_APPEND_COMPONENT_STACK__ !== false;
+        const breakOnConsoleErrors =
+          window.__REACT_DEVTOOLS_BREAK_ON_CONSOLE_ERRORS__ === true;
+
         // The installHook() function is injected by being stringified in the browser,
         // so imports outside of this function do not get included.
         //
@@ -181,9 +205,12 @@ export function installHook(target: any): DevToolsHook | null {
         // but Webpack wraps imports with an object (e.g. _backend_console__WEBPACK_IMPORTED_MODULE_0__)
         // and the object itself will be undefined as well for the reasons mentioned above,
         // so we use try/catch instead.
-        if (window.__REACT_DEVTOOLS_APPEND_COMPONENT_STACK__ !== false) {
+        if (appendComponentStack || breakOnConsoleErrors) {
           registerRendererWithConsole(renderer);
-          patchConsole();
+          patchConsole({
+            appendComponentStack,
+            breakOnConsoleErrors,
+          });
         }
       } catch (error) {}
     }
@@ -274,30 +301,32 @@ export function installHook(target: any): DevToolsHook | null {
   const listeners = {};
   const renderers = new Map();
 
-  const hook: DevToolsHook = {
-    rendererInterfaces,
-    listeners,
+  let hook: DevToolsHook = getMainWindow(target).__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  if (!hook) {
+    hook = {
+      rendererInterfaces,
+      listeners,
 
-    // Fast Refresh for web relies on this.
-    renderers,
+      // Fast Refresh for web relies on this.
+      renderers,
 
-    emit,
-    getFiberRoots,
-    inject,
-    on,
-    off,
-    sub,
+      emit,
+      getFiberRoots,
+      inject,
+      on,
+      off,
+      sub,
 
-    // This is a legacy flag.
-    // React v16 checks the hook for this to ensure DevTools is new enough.
-    supportsFiber: true,
+      // This is a legacy flag.
+      // React v16 checks the hook for this to ensure DevTools is new enough.
+      supportsFiber: true,
 
-    // React calls these methods.
-    checkDCE,
-    onCommitFiberUnmount,
-    onCommitFiberRoot,
-  };
-
+      // React calls these methods.
+      checkDCE,
+      onCommitFiberUnmount,
+      onCommitFiberRoot,
+    };
+  }
   Object.defineProperty(
     target,
     '__REACT_DEVTOOLS_GLOBAL_HOOK__',

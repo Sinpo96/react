@@ -7,7 +7,12 @@
  * @flow
  */
 
-import type {Fiber} from 'react-reconciler/src/ReactFiber';
+import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
+import type {ReactScopeInstance} from 'shared/ReactTypes';
+import type {
+  ReactDOMEventHandle,
+  ReactDOMEventHandleListener,
+} from '../shared/ReactDOMTypes';
 import type {
   Container,
   TextInstance,
@@ -15,7 +20,6 @@ import type {
   SuspenseInstance,
   Props,
 } from './ReactDOMHostConfig';
-import type {ReactDOMListener} from '../shared/ReactDOMTypes';
 
 import {
   HostComponent,
@@ -23,21 +27,25 @@ import {
   HostRoot,
   SuspenseComponent,
 } from 'react-reconciler/src/ReactWorkTags';
-import invariant from 'shared/invariant';
 
 import {getParentSuspenseInstance} from './ReactDOMHostConfig';
+
+import invariant from 'shared/invariant';
+import {enableScopeAPI} from 'shared/ReactFeatureFlags';
 
 const randomKey = Math.random()
   .toString(36)
   .slice(2);
-const internalInstanceKey = '__reactInternalInstance$' + randomKey;
-const internalEventHandlersKey = '__reactEventHandlers$' + randomKey;
-const internalContainerInstanceKey = '__reactContainere$' + randomKey;
-const internalEventListenersKey = '__reactEventListeners$' + randomKey;
+const internalInstanceKey = '__reactFiber$' + randomKey;
+const internalPropsKey = '__reactProps$' + randomKey;
+const internalContainerInstanceKey = '__reactContainer$' + randomKey;
+const internalEventHandlersKey = '__reactEvents$' + randomKey;
+const internalEventHandlerListenersKey = '__reactListeners$' + randomKey;
+const internalEventHandlesSetKey = '__reactHandles$' + randomKey;
 
 export function precacheFiberNode(
   hostInst: Fiber,
-  node: Instance | TextInstance | SuspenseInstance,
+  node: Instance | TextInstance | SuspenseInstance | ReactScopeInstance,
 ): void {
   (node: any)[internalInstanceKey] = hostInst;
 }
@@ -114,7 +122,7 @@ export function getClosestInstanceFromNode(targetNode: Node): null | Fiber {
           // have had an internalInstanceKey on it.
           // Let's get the fiber associated with the SuspenseComponent
           // as the deepest instance.
-          let targetSuspenseInst = suspenseInstance[internalInstanceKey];
+          const targetSuspenseInst = suspenseInstance[internalInstanceKey];
           if (targetSuspenseInst) {
             return targetSuspenseInst;
           }
@@ -178,27 +186,64 @@ export function getNodeFromInstance(inst: Fiber): Instance | TextInstance {
 export function getFiberCurrentPropsFromNode(
   node: Instance | TextInstance | SuspenseInstance,
 ): Props {
-  return (node: any)[internalEventHandlersKey] || null;
+  return (node: any)[internalPropsKey] || null;
 }
 
 export function updateFiberProps(
   node: Instance | TextInstance | SuspenseInstance,
   props: Props,
 ): void {
-  (node: any)[internalEventHandlersKey] = props;
+  (node: any)[internalPropsKey] = props;
 }
 
-// This is used for useEvent listeners
-export function getListenersFromTarget(
-  target: EventTarget,
-): null | Set<ReactDOMListener> {
-  return (target: any)[internalEventListenersKey] || null;
+export function getEventListenerSet(node: EventTarget): Set<string> {
+  let elementListenerSet = (node: any)[internalEventHandlersKey];
+  if (elementListenerSet === undefined) {
+    elementListenerSet = (node: any)[internalEventHandlersKey] = new Set();
+  }
+  return elementListenerSet;
 }
 
-// This is used for useEvent listeners
-export function initListenersSet(
-  target: EventTarget,
-  value: Set<ReactDOMListener>,
+export function getFiberFromScopeInstance(
+  scope: ReactScopeInstance,
+): null | Fiber {
+  if (enableScopeAPI) {
+    return (scope: any)[internalInstanceKey] || null;
+  }
+  return null;
+}
+
+export function setEventHandlerListeners(
+  scope: EventTarget | ReactScopeInstance,
+  listeners: Set<ReactDOMEventHandleListener>,
 ): void {
-  (target: any)[internalEventListenersKey] = value;
+  (scope: any)[internalEventHandlerListenersKey] = listeners;
+}
+
+export function getEventHandlerListeners(
+  scope: EventTarget | ReactScopeInstance,
+): null | Set<ReactDOMEventHandleListener> {
+  return (scope: any)[internalEventHandlerListenersKey] || null;
+}
+
+export function addEventHandleToTarget(
+  target: EventTarget | ReactScopeInstance,
+  eventHandle: ReactDOMEventHandle,
+): void {
+  let eventHandles = (target: any)[internalEventHandlesSetKey];
+  if (eventHandles === undefined) {
+    eventHandles = (target: any)[internalEventHandlesSetKey] = new Set();
+  }
+  eventHandles.add(eventHandle);
+}
+
+export function doesTargetHaveEventHandle(
+  target: EventTarget | ReactScopeInstance,
+  eventHandle: ReactDOMEventHandle,
+): boolean {
+  const eventHandles = (target: any)[internalEventHandlesSetKey];
+  if (eventHandles === undefined) {
+    return false;
+  }
+  return eventHandles.has(eventHandle);
 }

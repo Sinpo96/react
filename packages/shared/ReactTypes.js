@@ -86,37 +86,6 @@ export type RefObject = {|
   current: any,
 |};
 
-export type ReactEventResponderInstance<E, C> = {|
-  fiber: Object,
-  props: Object,
-  responder: ReactEventResponder<E, C>,
-  rootEventTypes: null | Set<string>,
-  state: Object,
-|};
-
-export type ReactEventResponderListener<E, C> = {|
-  props: Object,
-  responder: ReactEventResponder<E, C>,
-|};
-
-export type ReactEventResponder<E, C> = {
-  $$typeof: Symbol | number,
-  displayName: string,
-  targetEventTypes: null | Array<string>,
-  targetPortalPropagation: boolean,
-  rootEventTypes: null | Array<string>,
-  getInitialState: null | ((props: Object) => Object),
-  onEvent:
-    | null
-    | ((event: E, context: C, props: Object, state: Object) => void),
-  onRootEvent:
-    | null
-    | ((event: E, context: C, props: Object, state: Object) => void),
-  onMount: null | ((context: C, props: Object, state: Object) => void),
-  onUnmount: null | ((context: C, props: Object, state: Object) => void),
-  ...
-};
-
 export type EventPriority = 0 | 1 | 2;
 
 export const DiscreteEvent: EventPriority = 0;
@@ -179,16 +148,11 @@ export type ReactScopeQuery = (
   instance: mixed,
 ) => boolean;
 
-export type ReactScopeMethods = {|
+export type ReactScopeInstance = {|
   DO_NOT_USE_queryAllNodes(ReactScopeQuery): null | Array<Object>,
   DO_NOT_USE_queryFirstNode(ReactScopeQuery): null | Object,
   containsNode(Object): boolean,
   getChildContextValues: <T>(context: ReactContext<T>) => Array<T>,
-|};
-
-export type ReactScopeInstance = {|
-  fiber: Object,
-  methods: null | ReactScopeMethods,
 |};
 
 // Mutable source version can be anything (e.g. number, string, immutable data structure)
@@ -234,3 +198,21 @@ export type MutableSource<Source: $NonMaybeType<mixed>> = {|
   _currentPrimaryRenderer?: Object | null,
   _currentSecondaryRenderer?: Object | null,
 |};
+
+// The subset of a Thenable required by things thrown by Suspense.
+// This doesn't require a value to be passed to either handler.
+export interface Wakeable {
+  then(onFulfill: () => mixed, onReject: () => mixed): void | Wakeable;
+  // Special flag to opt out of tracing interactions across a Suspense boundary.
+  __reactDoNotTraceInteractions?: boolean;
+}
+
+// The subset of a Promise that React APIs rely on. This resolves a value.
+// This doesn't require a return value neither from the handler nor the
+// then function.
+export interface Thenable<+R> {
+  then<U>(
+    onFulfill: (value: R) => void | Thenable<U> | U,
+    onReject: (error: mixed) => void | Thenable<U> | U,
+  ): void | Thenable<U>;
+}

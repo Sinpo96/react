@@ -14,20 +14,13 @@
  * environment.
  */
 
-import type {ReactModelRoot} from 'react-client/flight';
-
 import {readModule} from 'react-noop-renderer/flight-modules';
 
 import ReactFlightClient from 'react-client/flight';
 
 type Source = Array<string>;
 
-const {
-  createResponse,
-  getModelRoot,
-  processStringChunk,
-  close,
-} = ReactFlightClient({
+const {createResponse, processStringChunk, close} = ReactFlightClient({
   supportsBinaryStreams: false,
   resolveModuleReference(idx: string) {
     return idx;
@@ -36,15 +29,18 @@ const {
   requireModule(idx: string) {
     return readModule(idx);
   },
+  parseModel(response: Response, json) {
+    return JSON.parse(json, response._fromJSON);
+  },
 });
 
-function read<T>(source: Source): ReactModelRoot<T> {
-  let response = createResponse(source);
+function read<T>(source: Source): T {
+  const response = createResponse(source);
   for (let i = 0; i < source.length; i++) {
     processStringChunk(response, source[i], 0);
   }
   close(response);
-  return getModelRoot(response);
+  return response.readRoot();
 }
 
 export {read};

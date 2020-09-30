@@ -7,27 +7,25 @@
  * @flow
  */
 
-import type {Fiber} from './ReactFiber';
-import type {FiberRoot} from './ReactFiberRoot';
-import type {RootTag} from 'react-reconciler/src/ReactRootTags';
+import type {Fiber, SuspenseHydrationCallbacks} from './ReactInternalTypes';
+import type {FiberRoot} from './ReactInternalTypes';
+import type {RootTag} from './ReactRootTags';
 import type {
   Instance,
   TextInstance,
   Container,
   PublicInstance,
 } from './ReactFiberHostConfig';
+import type {RendererInspectionConfig} from './ReactFiberHostConfig';
 import {FundamentalComponent} from './ReactWorkTags';
 import type {ReactNodeList} from 'shared/ReactTypes';
-import type {ExpirationTime} from './ReactFiberExpirationTime';
-import type {
-  SuspenseHydrationCallbacks,
-  SuspenseState,
-} from './ReactFiberSuspenseComponent';
+import type {Lane, LanePriority} from './ReactFiberLane';
+import type {SuspenseState} from './ReactFiberSuspenseComponent.old';
 
 import {
   findCurrentHostFiber,
   findCurrentHostFiberWithNoPortals,
-} from 'react-reconciler/src/ReactFiberTreeReflection';
+} from './ReactFiberTreeReflection';
 import {get as getInstance} from 'shared/ReactInstanceMap';
 import {
   HostComponent,
@@ -37,20 +35,20 @@ import {
 } from './ReactWorkTags';
 import getComponentName from 'shared/getComponentName';
 import invariant from 'shared/invariant';
+import {enableSchedulingProfiler} from 'shared/ReactFeatureFlags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
-
 import {getPublicInstance} from './ReactFiberHostConfig';
 import {
   findCurrentUnmaskedContext,
   processChildContext,
   emptyContextObject,
   isContextProvider as isLegacyContextProvider,
-} from './ReactFiberContext';
-import {createFiberRoot} from './ReactFiberRoot';
-import {injectInternals, onScheduleRoot} from './ReactFiberDevToolsHook';
+} from './ReactFiberContext.old';
+import {createFiberRoot} from './ReactFiberRoot.old';
+import {injectInternals, onScheduleRoot} from './ReactFiberDevToolsHook.old';
 import {
-  requestCurrentTimeForUpdate,
-  computeExpirationForFiber,
+  requestEventTime,
+  requestUpdateLane,
   scheduleUpdateOnFiber,
   flushRoot,
   batchedEventUpdates,
@@ -59,40 +57,54 @@ import {
   flushSync,
   flushControlled,
   deferredUpdates,
-  syncUpdates,
   discreteUpdates,
   flushDiscreteUpdates,
   flushPassiveEffects,
   warnIfNotScopedWithMatchingAct,
   warnIfUnmockedScheduler,
   IsThisRendererActing,
-} from './ReactFiberWorkLoop';
-import {createUpdate, enqueueUpdate} from './ReactUpdateQueue';
+  act,
+} from './ReactFiberWorkLoop.old';
+import {createUpdate, enqueueUpdate} from './ReactUpdateQueue.old';
 import {
-  getStackByFiberInDevAndProd,
   isRendering as ReactCurrentFiberIsRendering,
   current as ReactCurrentFiberCurrent,
+  resetCurrentFiber as resetCurrentDebugFiberInDEV,
+  setCurrentFiber as setCurrentDebugFiberInDEV,
 } from './ReactCurrentFiber';
 import {StrictMode} from './ReactTypeOfMode';
 import {
-  Sync,
-  ContinuousHydration,
-  computeInteractiveExpiration,
-} from './ReactFiberExpirationTime';
-import {requestCurrentSuspenseConfig} from './ReactFiberSuspenseConfig';
+  SyncLane,
+  InputDiscreteHydrationLane,
+  SelectiveHydrationLane,
+  NoTimestamp,
+  getHighestPriorityPendingLanes,
+  higherPriorityLane,
+  getCurrentUpdateLanePriority,
+  setCurrentUpdateLanePriority,
+} from './ReactFiberLane';
 import {
   scheduleRefresh,
   scheduleRoot,
   setRefreshHandler,
   findHostInstancesForRefresh,
-} from './ReactFiberHotReloading';
+} from './ReactFiberHotReloading.old';
+import {markRenderScheduled} from './SchedulingProfiler';
 
-// used by isTestEnvironment builds
-import enqueueTask from 'shared/enqueueTask';
-import * as Scheduler from 'scheduler';
-// end isTestEnvironment imports
-
+export {registerMutableSourceForHydration} from './ReactMutableSource.new';
 export {createPortal} from './ReactPortal';
+export {
+  createComponentSelector,
+  createHasPsuedoClassSelector,
+  createRoleSelector,
+  createTestNameSelector,
+  createTextSelector,
+  getFindAllNodesFailureDescription,
+  findAllNodes,
+  findBoundingRects,
+  focusWithin,
+  observeVisibleRects,
+} from './ReactTestSelectors';
 
 type OpaqueRoot = FiberRoot;
 
@@ -107,10 +119,7 @@ type DevToolsConfig = {|
   // Note: this actually *does* depend on Fiber internal fields.
   // Used by "inspect clicked DOM element" in React DevTools.
   findFiberByHostInstance?: (instance: Instance | TextInstance) => Fiber | null,
-  // Used by RN in-app inspector.
-  // This API is unfortunately RN-specific.
-  // TODO: Change it to accept Fiber instead and type it properly.
-  getInspectorDataForViewTag?: (tag: number) => Object,
+  rendererConfig?: RendererInspectionConfig,
 |};
 
 let didWarnAboutNestedUpdates;
@@ -186,30 +195,41 @@ function findHostInstanceWithWarning(
       const componentName = getComponentName(fiber.type) || 'Component';
       if (!didWarnAboutFindNodeInStrictMode[componentName]) {
         didWarnAboutFindNodeInStrictMode[componentName] = true;
-        if (fiber.mode & StrictMode) {
-          console.error(
-            '%s is deprecated in StrictMode. ' +
-              '%s was passed an instance of %s which is inside StrictMode. ' +
-              'Instead, add a ref directly to the element you want to reference. ' +
-              'Learn more about using refs safely here: ' +
-              'https://fb.me/react-strict-mode-find-node%s',
-            methodName,
-            methodName,
-            componentName,
-            getStackByFiberInDevAndProd(hostFiber),
-          );
-        } else {
-          console.error(
-            '%s is deprecated in StrictMode. ' +
-              '%s was passed an instance of %s which renders StrictMode children. ' +
-              'Instead, add a ref directly to the element you want to reference. ' +
-              'Learn more about using refs safely here: ' +
-              'https://fb.me/react-strict-mode-find-node%s',
-            methodName,
-            methodName,
-            componentName,
-            getStackByFiberInDevAndProd(hostFiber),
-          );
+
+        const previousFiber = ReactCurrentFiberCurrent;
+        try {
+          setCurrentDebugFiberInDEV(hostFiber);
+          if (fiber.mode & StrictMode) {
+            console.error(
+              '%s is deprecated in StrictMode. ' +
+                '%s was passed an instance of %s which is inside StrictMode. ' +
+                'Instead, add a ref directly to the element you want to reference. ' +
+                'Learn more about using refs safely here: ' +
+                'https://reactjs.org/link/strict-mode-find-node',
+              methodName,
+              methodName,
+              componentName,
+            );
+          } else {
+            console.error(
+              '%s is deprecated in StrictMode. ' +
+                '%s was passed an instance of %s which renders StrictMode children. ' +
+                'Instead, add a ref directly to the element you want to reference. ' +
+                'Learn more about using refs safely here: ' +
+                'https://reactjs.org/link/strict-mode-find-node',
+              methodName,
+              methodName,
+              componentName,
+            );
+          }
+        } finally {
+          // Ideally this should reset to previous but this shouldn't be called in
+          // render and there's another warning for that anyway.
+          if (previousFiber) {
+            setCurrentDebugFiberInDEV(previousFiber);
+          } else {
+            resetCurrentDebugFiberInDEV();
+          }
         }
       }
     }
@@ -232,12 +252,12 @@ export function updateContainer(
   container: OpaqueRoot,
   parentComponent: ?React$Component<any, any>,
   callback: ?Function,
-): ExpirationTime {
+): Lane {
   if (__DEV__) {
     onScheduleRoot(container, element);
   }
   const current = container.current;
-  const currentTime = requestCurrentTimeForUpdate();
+  const eventTime = requestEventTime();
   if (__DEV__) {
     // $FlowExpectedError - jest isn't a global, and isn't recognized outside of tests
     if ('undefined' !== typeof jest) {
@@ -245,12 +265,11 @@ export function updateContainer(
       warnIfNotScopedWithMatchingAct(current);
     }
   }
-  const suspenseConfig = requestCurrentSuspenseConfig();
-  const expirationTime = computeExpirationForFiber(
-    currentTime,
-    current,
-    suspenseConfig,
-  );
+  const lane = requestUpdateLane(current);
+
+  if (enableSchedulingProfiler) {
+    markRenderScheduled(lane);
+  }
 
   const context = getContextForSubtree(parentComponent);
   if (container.context === null) {
@@ -276,7 +295,7 @@ export function updateContainer(
     }
   }
 
-  const update = createUpdate(expirationTime, suspenseConfig);
+  const update = createUpdate(eventTime, lane);
   // Caution: React DevTools currently depends on this property
   // being called "element".
   update.payload = {element};
@@ -296,9 +315,9 @@ export function updateContainer(
   }
 
   enqueueUpdate(current, update);
-  scheduleUpdateOnFiber(current, expirationTime);
+  scheduleUpdateOnFiber(current, lane, eventTime);
 
-  return expirationTime;
+  return lane;
 }
 
 export {
@@ -306,13 +325,13 @@ export {
   batchedUpdates,
   unbatchedUpdates,
   deferredUpdates,
-  syncUpdates,
   discreteUpdates,
   flushDiscreteUpdates,
   flushControlled,
   flushSync,
   flushPassiveEffects,
   IsThisRendererActing,
+  act,
 };
 
 export function getPublicRootInstance(
@@ -333,40 +352,41 @@ export function getPublicRootInstance(
 export function attemptSynchronousHydration(fiber: Fiber): void {
   switch (fiber.tag) {
     case HostRoot:
-      let root: FiberRoot = fiber.stateNode;
+      const root: FiberRoot = fiber.stateNode;
       if (root.hydrate) {
         // Flush the first scheduled "update".
-        flushRoot(root, root.firstPendingTime);
+        const lanes = getHighestPriorityPendingLanes(root);
+        flushRoot(root, lanes);
       }
       break;
     case SuspenseComponent:
-      flushSync(() => scheduleUpdateOnFiber(fiber, Sync));
+      const eventTime = requestEventTime();
+      flushSync(() => scheduleUpdateOnFiber(fiber, SyncLane, eventTime));
       // If we're still blocked after this, we need to increase
       // the priority of any promises resolving within this
       // boundary so that they next attempt also has higher pri.
-      let retryExpTime = computeInteractiveExpiration(
-        requestCurrentTimeForUpdate(),
-      );
-      markRetryTimeIfNotHydrated(fiber, retryExpTime);
+      const retryLane = InputDiscreteHydrationLane;
+      markRetryLaneIfNotHydrated(fiber, retryLane);
       break;
   }
 }
 
-function markRetryTimeImpl(fiber: Fiber, retryTime: ExpirationTime) {
-  let suspenseState: null | SuspenseState = fiber.memoizedState;
+function markRetryLaneImpl(fiber: Fiber, retryLane: Lane) {
+  const suspenseState: null | SuspenseState = fiber.memoizedState;
   if (suspenseState !== null && suspenseState.dehydrated !== null) {
-    if (suspenseState.retryTime < retryTime) {
-      suspenseState.retryTime = retryTime;
-    }
+    suspenseState.retryLane = higherPriorityLane(
+      suspenseState.retryLane,
+      retryLane,
+    );
   }
 }
 
 // Increases the priority of thennables when they resolve within this boundary.
-function markRetryTimeIfNotHydrated(fiber: Fiber, retryTime: ExpirationTime) {
-  markRetryTimeImpl(fiber, retryTime);
-  let alternate = fiber.alternate;
+function markRetryLaneIfNotHydrated(fiber: Fiber, retryLane: Lane) {
+  markRetryLaneImpl(fiber, retryLane);
+  const alternate = fiber.alternate;
   if (alternate) {
-    markRetryTimeImpl(alternate, retryTime);
+    markRetryLaneImpl(alternate, retryLane);
   }
 }
 
@@ -378,9 +398,10 @@ export function attemptUserBlockingHydration(fiber: Fiber): void {
     // Suspense.
     return;
   }
-  let expTime = computeInteractiveExpiration(requestCurrentTimeForUpdate());
-  scheduleUpdateOnFiber(fiber, expTime);
-  markRetryTimeIfNotHydrated(fiber, expTime);
+  const eventTime = requestEventTime();
+  const lane = InputDiscreteHydrationLane;
+  scheduleUpdateOnFiber(fiber, lane, eventTime);
+  markRetryLaneIfNotHydrated(fiber, lane);
 }
 
 export function attemptContinuousHydration(fiber: Fiber): void {
@@ -391,8 +412,10 @@ export function attemptContinuousHydration(fiber: Fiber): void {
     // Suspense.
     return;
   }
-  scheduleUpdateOnFiber(fiber, ContinuousHydration);
-  markRetryTimeIfNotHydrated(fiber, ContinuousHydration);
+  const eventTime = requestEventTime();
+  const lane = SelectiveHydrationLane;
+  scheduleUpdateOnFiber(fiber, lane, eventTime);
+  markRetryLaneIfNotHydrated(fiber, lane);
 }
 
 export function attemptHydrationAtCurrentPriority(fiber: Fiber): void {
@@ -401,11 +424,23 @@ export function attemptHydrationAtCurrentPriority(fiber: Fiber): void {
     // their priority other than synchronously flush it.
     return;
   }
-  const currentTime = requestCurrentTimeForUpdate();
-  const expTime = computeExpirationForFiber(currentTime, fiber, null);
-  scheduleUpdateOnFiber(fiber, expTime);
-  markRetryTimeIfNotHydrated(fiber, expTime);
+  const eventTime = requestEventTime();
+  const lane = requestUpdateLane(fiber);
+  scheduleUpdateOnFiber(fiber, lane, eventTime);
+  markRetryLaneIfNotHydrated(fiber, lane);
 }
+
+export function runWithPriority<T>(priority: LanePriority, fn: () => T) {
+  const previousPriority = getCurrentUpdateLanePriority();
+  try {
+    setCurrentUpdateLanePriority(priority);
+    return fn();
+  } finally {
+    setCurrentUpdateLanePriority(previousPriority);
+  }
+}
+
+export {getCurrentUpdateLanePriority};
 
 export {findHostInstance};
 
@@ -431,24 +466,106 @@ export function shouldSuspend(fiber: Fiber): boolean {
 }
 
 let overrideHookState = null;
+let overrideHookStateDeletePath = null;
+let overrideHookStateRenamePath = null;
 let overrideProps = null;
+let overridePropsDeletePath = null;
+let overridePropsRenamePath = null;
 let scheduleUpdate = null;
 let setSuspenseHandler = null;
 
 if (__DEV__) {
+  const copyWithDeleteImpl = (
+    obj: Object | Array<any>,
+    path: Array<string | number>,
+    index: number,
+  ) => {
+    const key = path[index];
+    const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+    if (index + 1 === path.length) {
+      if (Array.isArray(updated)) {
+        updated.splice(((key: any): number), 1);
+      } else {
+        delete updated[key];
+      }
+      return updated;
+    }
+    // $FlowFixMe number or string is fine here
+    updated[key] = copyWithDeleteImpl(obj[key], path, index + 1);
+    return updated;
+  };
+
+  const copyWithDelete = (
+    obj: Object | Array<any>,
+    path: Array<string | number>,
+  ): Object | Array<any> => {
+    return copyWithDeleteImpl(obj, path, 0);
+  };
+
+  const copyWithRenameImpl = (
+    obj: Object | Array<any>,
+    oldPath: Array<string | number>,
+    newPath: Array<string | number>,
+    index: number,
+  ) => {
+    const oldKey = oldPath[index];
+    const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+    if (index + 1 === oldPath.length) {
+      const newKey = newPath[index];
+      // $FlowFixMe number or string is fine here
+      updated[newKey] = updated[oldKey];
+      if (Array.isArray(updated)) {
+        updated.splice(((oldKey: any): number), 1);
+      } else {
+        delete updated[oldKey];
+      }
+    } else {
+      // $FlowFixMe number or string is fine here
+      updated[oldKey] = copyWithRenameImpl(
+        // $FlowFixMe number or string is fine here
+        obj[oldKey],
+        oldPath,
+        newPath,
+        index + 1,
+      );
+    }
+    return updated;
+  };
+
+  const copyWithRename = (
+    obj: Object | Array<any>,
+    oldPath: Array<string | number>,
+    newPath: Array<string | number>,
+  ): Object | Array<any> => {
+    if (oldPath.length !== newPath.length) {
+      console.warn('copyWithRename() expects paths of the same length');
+      return;
+    } else {
+      for (let i = 0; i < newPath.length - 1; i++) {
+        if (oldPath[i] !== newPath[i]) {
+          console.warn(
+            'copyWithRename() expects paths to be the same except for the deepest key',
+          );
+          return;
+        }
+      }
+    }
+    return copyWithRenameImpl(obj, oldPath, newPath, 0);
+  };
+
   const copyWithSetImpl = (
     obj: Object | Array<any>,
     path: Array<string | number>,
-    idx: number,
+    index: number,
     value: any,
   ) => {
-    if (idx >= path.length) {
+    if (index >= path.length) {
       return value;
     }
-    const key = path[idx];
+    const key = path[index];
     const updated = Array.isArray(obj) ? obj.slice() : {...obj};
     // $FlowFixMe number or string is fine here
-    updated[key] = copyWithSetImpl(obj[key], path, idx + 1, value);
+    updated[key] = copyWithSetImpl(obj[key], path, index + 1, value);
     return updated;
   };
 
@@ -460,13 +577,7 @@ if (__DEV__) {
     return copyWithSetImpl(obj, path, 0, value);
   };
 
-  // Support DevTools editable values for useState and useReducer.
-  overrideHookState = (
-    fiber: Fiber,
-    id: number,
-    path: Array<string | number>,
-    value: any,
-  ) => {
+  const findHook = (fiber: Fiber, id: number) => {
     // For now, the "id" of stateful hooks is just the stateful hook index.
     // This may change in the future with e.g. nested hooks.
     let currentHook = fiber.memoizedState;
@@ -474,10 +585,21 @@ if (__DEV__) {
       currentHook = currentHook.next;
       id--;
     }
-    if (currentHook !== null) {
-      const newState = copyWithSet(currentHook.memoizedState, path, value);
-      currentHook.memoizedState = newState;
-      currentHook.baseState = newState;
+    return currentHook;
+  };
+
+  // Support DevTools editable values for useState and useReducer.
+  overrideHookState = (
+    fiber: Fiber,
+    id: number,
+    path: Array<string | number>,
+    value: any,
+  ) => {
+    const hook = findHook(fiber, id);
+    if (hook !== null) {
+      const newState = copyWithSet(hook.memoizedState, path, value);
+      hook.memoizedState = newState;
+      hook.baseState = newState;
 
       // We aren't actually adding an update to the queue,
       // because there is no update we can add for useReducer hooks that won't trigger an error.
@@ -486,7 +608,50 @@ if (__DEV__) {
       // Shallow cloning props works as a workaround for now to bypass the bailout check.
       fiber.memoizedProps = {...fiber.memoizedProps};
 
-      scheduleUpdateOnFiber(fiber, Sync);
+      scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
+    }
+  };
+  overrideHookStateDeletePath = (
+    fiber: Fiber,
+    id: number,
+    path: Array<string | number>,
+  ) => {
+    const hook = findHook(fiber, id);
+    if (hook !== null) {
+      const newState = copyWithDelete(hook.memoizedState, path);
+      hook.memoizedState = newState;
+      hook.baseState = newState;
+
+      // We aren't actually adding an update to the queue,
+      // because there is no update we can add for useReducer hooks that won't trigger an error.
+      // (There's no appropriate action type for DevTools overrides.)
+      // As a result though, React will see the scheduled update as a noop and bailout.
+      // Shallow cloning props works as a workaround for now to bypass the bailout check.
+      fiber.memoizedProps = {...fiber.memoizedProps};
+
+      scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
+    }
+  };
+  overrideHookStateRenamePath = (
+    fiber: Fiber,
+    id: number,
+    oldPath: Array<string | number>,
+    newPath: Array<string | number>,
+  ) => {
+    const hook = findHook(fiber, id);
+    if (hook !== null) {
+      const newState = copyWithRename(hook.memoizedState, oldPath, newPath);
+      hook.memoizedState = newState;
+      hook.baseState = newState;
+
+      // We aren't actually adding an update to the queue,
+      // because there is no update we can add for useReducer hooks that won't trigger an error.
+      // (There's no appropriate action type for DevTools overrides.)
+      // As a result though, React will see the scheduled update as a noop and bailout.
+      // Shallow cloning props works as a workaround for now to bypass the bailout check.
+      fiber.memoizedProps = {...fiber.memoizedProps};
+
+      scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
     }
   };
 
@@ -496,16 +661,52 @@ if (__DEV__) {
     if (fiber.alternate) {
       fiber.alternate.pendingProps = fiber.pendingProps;
     }
-    scheduleUpdateOnFiber(fiber, Sync);
+    scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
+  };
+  overridePropsDeletePath = (fiber: Fiber, path: Array<string | number>) => {
+    fiber.pendingProps = copyWithDelete(fiber.memoizedProps, path);
+    if (fiber.alternate) {
+      fiber.alternate.pendingProps = fiber.pendingProps;
+    }
+    scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
+  };
+  overridePropsRenamePath = (
+    fiber: Fiber,
+    oldPath: Array<string | number>,
+    newPath: Array<string | number>,
+  ) => {
+    fiber.pendingProps = copyWithRename(fiber.memoizedProps, oldPath, newPath);
+    if (fiber.alternate) {
+      fiber.alternate.pendingProps = fiber.pendingProps;
+    }
+    scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
   };
 
   scheduleUpdate = (fiber: Fiber) => {
-    scheduleUpdateOnFiber(fiber, Sync);
+    scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
   };
 
   setSuspenseHandler = (newShouldSuspendImpl: Fiber => boolean) => {
     shouldSuspendImpl = newShouldSuspendImpl;
   };
+}
+
+function findHostInstanceByFiber(fiber: Fiber): Instance | TextInstance | null {
+  const hostFiber = findCurrentHostFiber(fiber);
+  if (hostFiber === null) {
+    return null;
+  }
+  return hostFiber.stateNode;
+}
+
+function emptyFindFiberByHostInstance(
+  instance: Instance | TextInstance,
+): Fiber | null {
+  return null;
+}
+
+function getCurrentFiberForDevTools() {
+  return ReactCurrentFiberCurrent;
 }
 
 export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
@@ -516,214 +717,25 @@ export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
     bundleType: devToolsConfig.bundleType,
     version: devToolsConfig.version,
     rendererPackageName: devToolsConfig.rendererPackageName,
-    getInspectorDataForViewTag: devToolsConfig.getInspectorDataForViewTag,
+    rendererConfig: devToolsConfig.rendererConfig,
     overrideHookState,
+    overrideHookStateDeletePath,
+    overrideHookStateRenamePath,
     overrideProps,
+    overridePropsDeletePath,
+    overridePropsRenamePath,
     setSuspenseHandler,
     scheduleUpdate,
     currentDispatcherRef: ReactCurrentDispatcher,
-    findHostInstanceByFiber(fiber: Fiber): Instance | TextInstance | null {
-      const hostFiber = findCurrentHostFiber(fiber);
-      if (hostFiber === null) {
-        return null;
-      }
-      return hostFiber.stateNode;
-    },
-    findFiberByHostInstance(instance: Instance | TextInstance): Fiber | null {
-      if (!findFiberByHostInstance) {
-        // Might not be implemented by the renderer.
-        return null;
-      }
-      return findFiberByHostInstance(instance);
-    },
+    findHostInstanceByFiber,
+    findFiberByHostInstance:
+      findFiberByHostInstance || emptyFindFiberByHostInstance,
     // React Refresh
     findHostInstancesForRefresh: __DEV__ ? findHostInstancesForRefresh : null,
     scheduleRefresh: __DEV__ ? scheduleRefresh : null,
     scheduleRoot: __DEV__ ? scheduleRoot : null,
     setRefreshHandler: __DEV__ ? setRefreshHandler : null,
     // Enables DevTools to append owner stacks to error messages in DEV mode.
-    getCurrentFiber: __DEV__ ? () => ReactCurrentFiberCurrent : null,
+    getCurrentFiber: __DEV__ ? getCurrentFiberForDevTools : null,
   });
-}
-
-const {IsSomeRendererActing} = ReactSharedInternals;
-const isSchedulerMocked =
-  typeof Scheduler.unstable_flushAllWithoutAsserting === 'function';
-const flushWork =
-  Scheduler.unstable_flushAllWithoutAsserting ||
-  function() {
-    let didFlushWork = false;
-    while (flushPassiveEffects()) {
-      didFlushWork = true;
-    }
-
-    return didFlushWork;
-  };
-
-function flushWorkAndMicroTasks(onDone: (err: ?Error) => void) {
-  try {
-    flushWork();
-    enqueueTask(() => {
-      if (flushWork()) {
-        flushWorkAndMicroTasks(onDone);
-      } else {
-        onDone();
-      }
-    });
-  } catch (err) {
-    onDone(err);
-  }
-}
-
-// we track the 'depth' of the act() calls with this counter,
-// so we can tell if any async act() calls try to run in parallel.
-
-let actingUpdatesScopeDepth = 0;
-let didWarnAboutUsingActInProd = false;
-
-// eslint-disable-next-line no-inner-declarations
-export function act(callback: () => Thenable) {
-  if (!__DEV__) {
-    if (didWarnAboutUsingActInProd === false) {
-      didWarnAboutUsingActInProd = true;
-      // eslint-disable-next-line react-internal/no-production-logging
-      console.error(
-        'act(...) is not supported in production builds of React, and might not behave as expected.',
-      );
-    }
-  }
-
-  let previousActingUpdatesScopeDepth = actingUpdatesScopeDepth;
-  let previousIsSomeRendererActing;
-  let previousIsThisRendererActing;
-  actingUpdatesScopeDepth++;
-
-  previousIsSomeRendererActing = IsSomeRendererActing.current;
-  previousIsThisRendererActing = IsThisRendererActing.current;
-  IsSomeRendererActing.current = true;
-  IsThisRendererActing.current = true;
-
-  function onDone() {
-    actingUpdatesScopeDepth--;
-    IsSomeRendererActing.current = previousIsSomeRendererActing;
-    IsThisRendererActing.current = previousIsThisRendererActing;
-    if (__DEV__) {
-      if (actingUpdatesScopeDepth > previousActingUpdatesScopeDepth) {
-        // if it's _less than_ previousActingUpdatesScopeDepth, then we can assume the 'other' one has warned
-        console.error(
-          'You seem to have overlapping act() calls, this is not supported. ' +
-            'Be sure to await previous act() calls before making a new one. ',
-        );
-      }
-    }
-  }
-
-  let result;
-  try {
-    result = batchedUpdates(callback);
-  } catch (error) {
-    // on sync errors, we still want to 'cleanup' and decrement actingUpdatesScopeDepth
-    onDone();
-    throw error;
-  }
-
-  if (
-    result !== null &&
-    typeof result === 'object' &&
-    typeof result.then === 'function'
-  ) {
-    // setup a boolean that gets set to true only
-    // once this act() call is await-ed
-    let called = false;
-    if (__DEV__) {
-      if (typeof Promise !== 'undefined') {
-        //eslint-disable-next-line no-undef
-        Promise.resolve()
-          .then(() => {})
-          .then(() => {
-            if (called === false) {
-              console.error(
-                'You called act(async () => ...) without await. ' +
-                  'This could lead to unexpected testing behaviour, interleaving multiple act ' +
-                  'calls and mixing their scopes. You should - await act(async () => ...);',
-              );
-            }
-          });
-      }
-    }
-
-    // in the async case, the returned thenable runs the callback, flushes
-    // effects and  microtasks in a loop until flushPassiveEffects() === false,
-    // and cleans up
-    return {
-      then(resolve: () => void, reject: (?Error) => void) {
-        called = true;
-        result.then(
-          () => {
-            if (
-              actingUpdatesScopeDepth > 1 ||
-              (isSchedulerMocked === true &&
-                previousIsSomeRendererActing === true)
-            ) {
-              onDone();
-              resolve();
-              return;
-            }
-            // we're about to exit the act() scope,
-            // now's the time to flush tasks/effects
-            flushWorkAndMicroTasks((err: ?Error) => {
-              onDone();
-              if (err) {
-                reject(err);
-              } else {
-                resolve();
-              }
-            });
-          },
-          err => {
-            onDone();
-            reject(err);
-          },
-        );
-      },
-    };
-  } else {
-    if (__DEV__) {
-      if (result !== undefined) {
-        console.error(
-          'The callback passed to act(...) function ' +
-            'must return undefined, or a Promise. You returned %s',
-          result,
-        );
-      }
-    }
-
-    // flush effects until none remain, and cleanup
-    try {
-      if (
-        actingUpdatesScopeDepth === 1 &&
-        (isSchedulerMocked === false || previousIsSomeRendererActing === false)
-      ) {
-        // we're about to exit the act() scope,
-        // now's the time to flush effects
-        flushWork();
-      }
-      onDone();
-    } catch (err) {
-      onDone();
-      throw err;
-    }
-
-    // in the sync case, the returned thenable only warns *if* await-ed
-    return {
-      then(resolve: () => void) {
-        if (__DEV__) {
-          console.error(
-            'Do not await the result of calling act(...) with sync logic, it is not a Promise.',
-          );
-        }
-        resolve();
-      },
-    };
-  }
 }

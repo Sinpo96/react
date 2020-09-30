@@ -16,6 +16,7 @@ let act;
 let React;
 let ReactNoop;
 let ReactNoopFlightServer;
+let ReactNoopFlightServerRuntime;
 let ReactNoopFlightClient;
 
 describe('ReactFlight', () => {
@@ -25,16 +26,22 @@ describe('ReactFlight', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     ReactNoopFlightServer = require('react-noop-renderer/flight-server');
+    ReactNoopFlightServerRuntime = require('react-noop-renderer/flight-server-runtime');
     ReactNoopFlightClient = require('react-noop-renderer/flight-client');
     act = ReactNoop.act;
   });
 
-  function block(query, render) {
-    return function(...args) {
-      let curriedQuery = () => {
-        return query(...args);
+  function block(render, load) {
+    if (load === undefined) {
+      return () => {
+        return ReactNoopFlightServerRuntime.serverBlockNoData(render);
       };
-      return [Symbol.for('react.server.block'), render, curriedQuery];
+    }
+    return function(...args) {
+      const curriedLoad = () => {
+        return load(...args);
+      };
+      return ReactNoopFlightServerRuntime.serverBlock(render, curriedLoad);
     };
   }
 
@@ -51,11 +58,10 @@ describe('ReactFlight', () => {
         ),
       };
     }
-    let transport = ReactNoopFlightServer.render({
+    const transport = ReactNoopFlightServer.render({
       foo: <Foo />,
     });
-    let root = ReactNoopFlightClient.read(transport);
-    let model = root.model;
+    const model = ReactNoopFlightClient.read(transport);
     expect(model).toEqual({
       foo: {
         bar: (
@@ -70,8 +76,32 @@ describe('ReactFlight', () => {
   });
 
   if (ReactFeatureFlags.enableBlocksAPI) {
-    it('can transfer a Block to the client and render there', () => {
-      function Query(firstName, lastName) {
+    it('can transfer a Block to the client and render there, without data', () => {
+      function User(props, data) {
+        return (
+          <span>
+            {props.greeting} {typeof data}
+          </span>
+        );
+      }
+      const loadUser = block(User);
+      const model = {
+        User: loadUser('Seb', 'Smith'),
+      };
+
+      const transport = ReactNoopFlightServer.render(model);
+
+      act(() => {
+        const rootModel = ReactNoopFlightClient.read(transport);
+        const UserClient = rootModel.User;
+        ReactNoop.render(<UserClient greeting="Hello" />);
+      });
+
+      expect(ReactNoop).toMatchRenderedOutput(<span>Hello undefined</span>);
+    });
+
+    it('can transfer a Block to the client and render there, with data', () => {
+      function load(firstName, lastName) {
         return {name: firstName + ' ' + lastName};
       }
       function User(props, data) {
@@ -81,16 +111,16 @@ describe('ReactFlight', () => {
           </span>
         );
       }
-      let loadUser = block(Query, User);
-      let model = {
+      const loadUser = block(User, load);
+      const model = {
         User: loadUser('Seb', 'Smith'),
       };
 
-      let transport = ReactNoopFlightServer.render(model);
-      let root = ReactNoopFlightClient.read(transport);
+      const transport = ReactNoopFlightServer.render(model);
 
       act(() => {
-        let UserClient = root.model.User;
+        const rootModel = ReactNoopFlightClient.read(transport);
+        const UserClient = rootModel.User;
         ReactNoop.render(<UserClient greeting="Hello" />);
       });
 

@@ -7,18 +7,41 @@
  * @flow
  */
 
-let loggedTypeFailures = {};
+const loggedTypeFailures = {};
+
+import {describeUnknownElementTypeFrameInDEV} from 'shared/ReactComponentStackFrame';
+
+import ReactSharedInternals from 'shared/ReactSharedInternals';
+
+const ReactDebugCurrentFrame = ReactSharedInternals.ReactDebugCurrentFrame;
+
+function setCurrentlyValidatingElement(element) {
+  if (__DEV__) {
+    if (element) {
+      const owner = element._owner;
+      const stack = describeUnknownElementTypeFrameInDEV(
+        element.type,
+        element._source,
+        owner ? owner.type : null,
+      );
+      ReactDebugCurrentFrame.setExtraStackFrame(stack);
+    } else {
+      ReactDebugCurrentFrame.setExtraStackFrame(null);
+    }
+  }
+}
 
 export default function checkPropTypes(
   typeSpecs: Object,
   values: Object,
   location: string,
   componentName: ?string,
+  element?: any,
 ): void {
   if (__DEV__) {
     // $FlowFixMe This is okay but Flow doesn't know it.
-    let has = Function.call.bind(Object.prototype.hasOwnProperty);
-    for (let typeSpecName in typeSpecs) {
+    const has = Function.call.bind(Object.prototype.hasOwnProperty);
+    for (const typeSpecName in typeSpecs) {
       if (has(typeSpecs, typeSpecName)) {
         let error;
         // Prop type validation may throw. In case they do, we don't want to
@@ -28,7 +51,7 @@ export default function checkPropTypes(
           // This is intentionally an invariant that gets caught. It's the same
           // behavior as without this statement except with a better message.
           if (typeof typeSpecs[typeSpecName] !== 'function') {
-            let err = Error(
+            const err = Error(
               (componentName || 'React class') +
                 ': ' +
                 location +
@@ -55,6 +78,7 @@ export default function checkPropTypes(
           error = ex;
         }
         if (error && !(error instanceof Error)) {
+          setCurrentlyValidatingElement(element);
           console.error(
             '%s: type specification of %s' +
               ' `%s` is invalid; the type checker ' +
@@ -67,12 +91,15 @@ export default function checkPropTypes(
             typeSpecName,
             typeof error,
           );
+          setCurrentlyValidatingElement(null);
         }
         if (error instanceof Error && !(error.message in loggedTypeFailures)) {
           // Only monitor this failure once because there tends to be a lot of the
           // same error.
           loggedTypeFailures[error.message] = true;
+          setCurrentlyValidatingElement(element);
           console.error('Failed %s type: %s', location, error.message);
+          setCurrentlyValidatingElement(null);
         }
       }
     }

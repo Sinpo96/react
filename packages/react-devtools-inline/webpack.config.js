@@ -17,7 +17,7 @@ const DEVTOOLS_VERSION = getVersionString();
 
 module.exports = {
   mode: __DEV__ ? 'development' : 'production',
-  devtool: false,
+  devtool: __DEV__ ? 'eval-cheap-source-map' : 'source-map',
   entry: {
     backend: './src/backend.js',
     frontend: './src/frontend.js',
@@ -36,9 +36,14 @@ module.exports = {
     'react-is': 'react-is',
     scheduler: 'scheduler',
   },
+  optimization: {
+    minimize: false,
+  },
   plugins: [
     new DefinePlugin({
       __DEV__,
+      __PROFILE__: false,
+      __EXPERIMENTAL__: true,
       'process.env.DEVTOOLS_VERSION': `"${DEVTOOLS_VERSION}"`,
       'process.env.GITHUB_URL': `"${GITHUB_URL}"`,
       'process.env.NODE_ENV': `"${NODE_ENV}"`,

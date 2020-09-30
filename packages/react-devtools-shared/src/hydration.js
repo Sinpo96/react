@@ -7,10 +7,10 @@
  * @flow
  */
 
-import Symbol from 'es6-symbol';
 import {
   getDataType,
   getDisplayNameForReactElement,
+  getAllEnumerableKeys,
   getInObject,
   formatDataForPreview,
   setInObject,
@@ -122,7 +122,7 @@ export function dehydrate(
   cleaned: Array<Array<string | number>>,
   unserializable: Array<Array<string | number>>,
   path: Array<string | number>,
-  isPathWhitelisted: (path: Array<string | number>) => boolean,
+  isPathAllowed: (path: Array<string | number>) => boolean,
   level?: number = 0,
 ):
   | string
@@ -133,7 +133,7 @@ export function dehydrate(
   | {[key: string]: string | Dehydrated | Unserializable, ...} {
   const type = getDataType(data);
 
-  let isPathWhitelistedCheck;
+  let isPathAllowedCheck;
 
   switch (type) {
     case 'html_element':
@@ -152,7 +152,10 @@ export function dehydrate(
         inspectable: false,
         preview_short: formatDataForPreview(data, false),
         preview_long: formatDataForPreview(data, true),
-        name: data.name || 'function',
+        name:
+          typeof data.name === 'function' || !data.name
+            ? 'function'
+            : data.name,
         type,
       };
 
@@ -205,8 +208,8 @@ export function dehydrate(
       };
 
     case 'array':
-      isPathWhitelistedCheck = isPathWhitelisted(path);
-      if (level >= LEVEL_THRESHOLD && !isPathWhitelistedCheck) {
+      isPathAllowedCheck = isPathAllowed(path);
+      if (level >= LEVEL_THRESHOLD && !isPathAllowedCheck) {
         return createDehydrated(type, true, data, cleaned, path);
       }
       return data.map((item, i) =>
@@ -215,15 +218,16 @@ export function dehydrate(
           cleaned,
           unserializable,
           path.concat([i]),
-          isPathWhitelisted,
-          isPathWhitelistedCheck ? 1 : level + 1,
+          isPathAllowed,
+          isPathAllowedCheck ? 1 : level + 1,
         ),
       );
 
+    case 'html_all_collection':
     case 'typed_array':
     case 'iterator':
-      isPathWhitelistedCheck = isPathWhitelisted(path);
-      if (level >= LEVEL_THRESHOLD && !isPathWhitelistedCheck) {
+      isPathAllowedCheck = isPathAllowed(path);
+      if (level >= LEVEL_THRESHOLD && !isPathAllowedCheck) {
         return createDehydrated(type, true, data, cleaned, path);
       } else {
         const unserializableValue: Unserializable = {
@@ -251,8 +255,8 @@ export function dehydrate(
                 cleaned,
                 unserializable,
                 path.concat([i]),
-                isPathWhitelisted,
-                isPathWhitelistedCheck ? 1 : level + 1,
+                isPathAllowed,
+                isPathAllowedCheck ? 1 : level + 1,
               )),
           );
         }
@@ -261,6 +265,16 @@ export function dehydrate(
 
         return unserializableValue;
       }
+
+    case 'opaque_iterator':
+      cleaned.push(path);
+      return {
+        inspectable: false,
+        preview_short: formatDataForPreview(data, false),
+        preview_long: formatDataForPreview(data, true),
+        name: data[Symbol.toStringTag],
+        type,
+      };
 
     case 'date':
       cleaned.push(path);
@@ -283,21 +297,22 @@ export function dehydrate(
       };
 
     case 'object':
-      isPathWhitelistedCheck = isPathWhitelisted(path);
-      if (level >= LEVEL_THRESHOLD && !isPathWhitelistedCheck) {
+      isPathAllowedCheck = isPathAllowed(path);
+      if (level >= LEVEL_THRESHOLD && !isPathAllowedCheck) {
         return createDehydrated(type, true, data, cleaned, path);
       } else {
         const object = {};
-        for (let name in data) {
+        getAllEnumerableKeys(data).forEach(key => {
+          const name = key.toString();
           object[name] = dehydrate(
-            data[name],
+            data[key],
             cleaned,
             unserializable,
             path.concat([name]),
-            isPathWhitelisted,
-            isPathWhitelistedCheck ? 1 : level + 1,
+            isPathAllowed,
+            isPathAllowedCheck ? 1 : level + 1,
           );
-        }
+        });
         return object;
       }
 

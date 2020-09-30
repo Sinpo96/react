@@ -25,7 +25,7 @@ const DEVTOOLS_VERSION = getVersionString();
 
 const config = {
   mode: __DEV__ ? 'development' : 'production',
-  devtool: false,
+  devtool: __DEV__ ? 'cheap-module-eval-source-map' : 'source-map',
   entry: {
     app: './src/app/index.js',
     devtools: './src/devtools.js',
@@ -39,9 +39,14 @@ const config = {
       scheduler: resolve(builtModulesDir, 'scheduler'),
     },
   },
+  optimization: {
+    minimize: false,
+  },
   plugins: [
     new DefinePlugin({
       __DEV__,
+      __PROFILE__: false,
+      __EXPERIMENTAL__: true,
       'process.env.GITHUB_URL': `"${GITHUB_URL}"`,
       'process.env.DEVTOOLS_VERSION': `"${DEVTOOLS_VERSION}"`,
     }),

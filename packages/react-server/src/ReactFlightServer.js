@@ -7,6 +7,7 @@
  * @flow
  */
 
+import type {Dispatcher as DispatcherType} from 'react-reconciler/src/ReactInternalTypes';
 import type {
   Destination,
   Chunk,
@@ -29,12 +30,24 @@ import {
 
 import {
   REACT_BLOCK_TYPE,
-  REACT_SERVER_BLOCK_TYPE,
   REACT_ELEMENT_TYPE,
+  REACT_DEBUG_TRACING_MODE_TYPE,
+  REACT_FORWARD_REF_TYPE,
   REACT_FRAGMENT_TYPE,
   REACT_LAZY_TYPE,
+  REACT_LEGACY_HIDDEN_TYPE,
+  REACT_MEMO_TYPE,
+  REACT_OFFSCREEN_TYPE,
+  REACT_PROFILER_TYPE,
+  REACT_SCOPE_TYPE,
+  REACT_SERVER_BLOCK_TYPE,
+  REACT_STRICT_MODE_TYPE,
+  REACT_SUSPENSE_TYPE,
+  REACT_SUSPENSE_LIST_TYPE,
 } from 'shared/ReactSymbols';
 
+import * as React from 'react';
+import ReactSharedInternals from 'shared/ReactSharedInternals';
 import invariant from 'shared/invariant';
 
 type ReactJSONValue =
@@ -74,13 +87,15 @@ export type Request = {
   toJSON: (key: string, value: ReactModel) => ReactJSONValue,
 };
 
+const ReactCurrentDispatcher = ReactSharedInternals.ReactCurrentDispatcher;
+
 export function createRequest(
   model: ReactModel,
   destination: Destination,
   bundlerConfig: BundlerConfig,
 ): Request {
-  let pingedSegments = [];
-  let request = {
+  const pingedSegments = [];
+  const request = {
     destination,
     bundlerConfig,
     nextChunkId: 0,
@@ -94,14 +109,14 @@ export function createRequest(
     },
   };
   request.pendingChunks++;
-  let rootSegment = createSegment(request, () => model);
+  const rootSegment = createSegment(request, () => model);
   pingedSegments.push(rootSegment);
   return request;
 }
 
 function attemptResolveElement(element: React$Element<any>): ReactModel {
-  let type = element.type;
-  let props = element.props;
+  const type = element.type;
+  const props = element.props;
   if (typeof type === 'function') {
     // This is a server-side component.
     return type(props);
@@ -110,15 +125,37 @@ function attemptResolveElement(element: React$Element<any>): ReactModel {
     return [REACT_ELEMENT_TYPE, type, element.key, element.props];
   } else if (type[0] === REACT_SERVER_BLOCK_TYPE) {
     return [REACT_ELEMENT_TYPE, type, element.key, element.props];
-  } else if (type === REACT_FRAGMENT_TYPE) {
+  } else if (
+    type === REACT_FRAGMENT_TYPE ||
+    type === REACT_STRICT_MODE_TYPE ||
+    type === REACT_PROFILER_TYPE ||
+    type === REACT_SCOPE_TYPE ||
+    type === REACT_DEBUG_TRACING_MODE_TYPE ||
+    type === REACT_LEGACY_HIDDEN_TYPE ||
+    type === REACT_OFFSCREEN_TYPE ||
+    // TODO: These are temporary shims
+    // and we'll want a different behavior.
+    type === REACT_SUSPENSE_TYPE ||
+    type === REACT_SUSPENSE_LIST_TYPE
+  ) {
     return element.props.children;
-  } else {
-    invariant(false, 'Unsupported type.');
+  } else if (type != null && typeof type === 'object') {
+    switch (type.$$typeof) {
+      case REACT_FORWARD_REF_TYPE: {
+        const render = type.render;
+        return render(props, undefined);
+      }
+      case REACT_MEMO_TYPE: {
+        const nextChildren = React.createElement(type.type, element.props);
+        return attemptResolveElement(nextChildren);
+      }
+    }
   }
+  invariant(false, 'Unsupported type.');
 }
 
 function pingSegment(request: Request, segment: Segment): void {
-  let pingedSegments = request.pingedSegments;
+  const pingedSegments = request.pingedSegments;
   pingedSegments.push(segment);
   if (pingedSegments.length === 1) {
     scheduleWork(() => performWork(request));
@@ -126,8 +163,8 @@ function pingSegment(request: Request, segment: Segment): void {
 }
 
 function createSegment(request: Request, query: () => ReactModel): Segment {
-  let id = request.nextChunkId++;
-  let segment = {
+  const id = request.nextChunkId++;
+  const segment = {
     id,
     query,
     ping: () => pingSegment(request, segment),
@@ -176,26 +213,26 @@ export function resolveModelToJSON(
     switch (key) {
       case '1': {
         // Module reference
-        let moduleReference: ModuleReference = (value: any);
+        const moduleReference: ModuleReference<any> = (value: any);
         try {
-          let moduleMetaData: ModuleMetaData = resolveModuleMetaData(
+          const moduleMetaData: ModuleMetaData = resolveModuleMetaData(
             request.bundlerConfig,
             moduleReference,
           );
           return (moduleMetaData: ReactJSONValue);
         } catch (x) {
           request.pendingChunks++;
-          let errorId = request.nextChunkId++;
+          const errorId = request.nextChunkId++;
           emitErrorChunk(request, errorId, x);
           return serializeIDRef(errorId);
         }
       }
       case '2': {
-        // Query
-        let query: () => ReactModel = (value: any);
+        // Load function
+        const load: () => ReactModel = (value: any);
         try {
-          // Attempt to resolve the query.
-          return query();
+          // Attempt to resolve the data.
+          return load();
         } catch (x) {
           if (
             typeof x === 'object' &&
@@ -204,14 +241,14 @@ export function resolveModelToJSON(
           ) {
             // Something suspended, we'll need to create a new segment and resolve it later.
             request.pendingChunks++;
-            let newSegment = createSegment(request, query);
-            let ping = newSegment.ping;
+            const newSegment = createSegment(request, load);
+            const ping = newSegment.ping;
             x.then(ping, ping);
             return serializeIDRef(newSegment.id);
           } else {
-            // This query failed, encode the error as a separate row and reference that.
+            // This load failed, encode the error as a separate row and reference that.
             request.pendingChunks++;
-            let errorId = request.nextChunkId++;
+            const errorId = request.nextChunkId++;
             emitErrorChunk(request, errorId, x);
             return serializeIDRef(errorId);
           }
@@ -237,9 +274,23 @@ export function resolveModelToJSON(
     value.$$typeof === REACT_ELEMENT_TYPE
   ) {
     // TODO: Concatenate keys of parents onto children.
-    // TODO: Allow elements to suspend independently and serialize as references to future elements.
-    let element: React$Element<any> = (value: any);
-    value = attemptResolveElement(element);
+    const element: React$Element<any> = (value: any);
+    try {
+      // Attempt to render the server component.
+      value = attemptResolveElement(element);
+    } catch (x) {
+      if (typeof x === 'object' && x !== null && typeof x.then === 'function') {
+        // Something suspended, we'll need to create a new segment and resolve it later.
+        request.pendingChunks++;
+        const newSegment = createSegment(request, () => value);
+        const ping = newSegment.ping;
+        x.then(ping, ping);
+        return serializeIDRef(newSegment.id);
+      } else {
+        // Something errored. Don't bother encoding anything up to here.
+        throw x;
+      }
+    }
   }
 
   return value;
@@ -262,20 +313,34 @@ function emitErrorChunk(request: Request, id: number, error: mixed): void {
     message = 'An error occurred but serializing the error message failed.';
   }
 
-  let processedChunk = processErrorChunk(request, id, message, stack);
+  const processedChunk = processErrorChunk(request, id, message, stack);
   request.completedErrorChunks.push(processedChunk);
 }
 
 function retrySegment(request: Request, segment: Segment): void {
-  let query = segment.query;
+  const query = segment.query;
+  let value;
   try {
-    let value = query();
-    let processedChunk = processModelChunk(request, segment.id, value);
+    value = query();
+    while (
+      typeof value === 'object' &&
+      value !== null &&
+      value.$$typeof === REACT_ELEMENT_TYPE
+    ) {
+      // TODO: Concatenate keys of parents onto children.
+      const element: React$Element<any> = (value: any);
+      // Attempt to render the server component.
+      // Doing this here lets us reuse this same segment if the next component
+      // also suspends.
+      segment.query = () => value;
+      value = attemptResolveElement(element);
+    }
+    const processedChunk = processModelChunk(request, segment.id, value);
     request.completedJSONChunks.push(processedChunk);
   } catch (x) {
     if (typeof x === 'object' && x !== null && typeof x.then === 'function') {
       // Something suspended again, let's pick it back up later.
-      let ping = segment.ping;
+      const ping = segment.ping;
       x.then(ping, ping);
       return;
     } else {
@@ -286,15 +351,20 @@ function retrySegment(request: Request, segment: Segment): void {
 }
 
 function performWork(request: Request): void {
-  let pingedSegments = request.pingedSegments;
+  const prevDispatcher = ReactCurrentDispatcher.current;
+  ReactCurrentDispatcher.current = Dispatcher;
+
+  const pingedSegments = request.pingedSegments;
   request.pingedSegments = [];
   for (let i = 0; i < pingedSegments.length; i++) {
-    let segment = pingedSegments[i];
+    const segment = pingedSegments[i];
     retrySegment(request, segment);
   }
   if (request.flowing) {
     flushCompletedChunks(request);
   }
+
+  ReactCurrentDispatcher.current = prevDispatcher;
 }
 
 let reentrant = false;
@@ -303,14 +373,14 @@ function flushCompletedChunks(request: Request): void {
     return;
   }
   reentrant = true;
-  let destination = request.destination;
+  const destination = request.destination;
   beginWriting(destination);
   try {
-    let jsonChunks = request.completedJSONChunks;
+    const jsonChunks = request.completedJSONChunks;
     let i = 0;
     for (; i < jsonChunks.length; i++) {
       request.pendingChunks--;
-      let chunk = jsonChunks[i];
+      const chunk = jsonChunks[i];
       if (!writeChunk(destination, chunk)) {
         request.flowing = false;
         i++;
@@ -318,11 +388,11 @@ function flushCompletedChunks(request: Request): void {
       }
     }
     jsonChunks.splice(0, i);
-    let errorChunks = request.completedErrorChunks;
+    const errorChunks = request.completedErrorChunks;
     i = 0;
     for (; i < errorChunks.length; i++) {
       request.pendingChunks--;
-      let chunk = errorChunks[i];
+      const chunk = errorChunks[i];
       if (!writeChunk(destination, chunk)) {
         request.flowing = false;
         i++;
@@ -350,3 +420,33 @@ export function startFlowing(request: Request): void {
   request.flowing = true;
   flushCompletedChunks(request);
 }
+
+function unsupportedHook(): void {
+  invariant(false, 'This Hook is not supported in Server Components.');
+}
+
+const Dispatcher: DispatcherType = {
+  useMemo<T>(nextCreate: () => T): T {
+    return nextCreate();
+  },
+  useCallback<T>(callback: T): T {
+    return callback;
+  },
+  useDebugValue(): void {},
+  useDeferredValue<T>(value: T): T {
+    return value;
+  },
+  useTransition(): [(callback: () => void) => void, boolean] {
+    return [() => {}, false];
+  },
+  readContext: (unsupportedHook: any),
+  useContext: (unsupportedHook: any),
+  useReducer: (unsupportedHook: any),
+  useRef: (unsupportedHook: any),
+  useState: (unsupportedHook: any),
+  useLayoutEffect: (unsupportedHook: any),
+  useImperativeHandle: (unsupportedHook: any),
+  useEffect: (unsupportedHook: any),
+  useOpaqueIdentifier: (unsupportedHook: any),
+  useMutableSource: (unsupportedHook: any),
+};

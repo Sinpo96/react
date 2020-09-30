@@ -66,7 +66,7 @@ function getComponentName(type: mixed): string | null {
     case REACT_PORTAL_TYPE:
       return 'Portal';
     case REACT_PROFILER_TYPE:
-      return `Profiler`;
+      return 'Profiler';
     case REACT_STRICT_MODE_TYPE:
       return 'StrictMode';
     case REACT_SUSPENSE_TYPE:
@@ -90,8 +90,8 @@ function getComponentName(type: mixed): string | null {
         return getComponentName(type._render);
       case REACT_LAZY_TYPE: {
         const lazyComponent: LazyComponent<any, any> = (type: any);
-        let payload = lazyComponent._payload;
-        let init = lazyComponent._init;
+        const payload = lazyComponent._payload;
+        const init = lazyComponent._init;
         try {
           return getComponentName(init(payload));
         } catch (x) {

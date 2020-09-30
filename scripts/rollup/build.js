@@ -21,7 +21,7 @@ const useForks = require('./plugins/use-forks-plugin');
 const stripUnusedImports = require('./plugins/strip-unused-imports');
 const extractErrorCodes = require('../error-codes/extract-errors');
 const Packaging = require('./packaging');
-const {asyncCopyTo, asyncRimRaf} = require('./utils');
+const {asyncRimRaf} = require('./utils');
 const codeFrame = require('babel-code-frame');
 const Wrappers = require('./wrappers');
 
@@ -45,6 +45,7 @@ process.on('unhandledRejection', err => {
 });
 
 const {
+  NODE_ES2015,
   UMD_DEV,
   UMD_PROD,
   UMD_PROFILING,
@@ -61,6 +62,8 @@ const {
   RN_FB_PROD,
   RN_FB_PROFILING,
 } = Bundles.bundleTypes;
+
+const {getFilename} = Bundles;
 
 function parseRequestedNames(names, toCase) {
   let result = [];
@@ -97,7 +100,7 @@ const errorCodeOpts = {
 
 const closureOptions = {
   compilation_level: 'SIMPLE',
-  language_in: 'ECMASCRIPT5_STRICT',
+  language_in: 'ECMASCRIPT_2015',
   language_out: 'ECMASCRIPT5_STRICT',
   env: 'CUSTOM',
   warning_level: 'QUIET',
@@ -105,7 +108,40 @@ const closureOptions = {
   use_types_for_optimization: false,
   process_common_js_modules: false,
   rewrite_polyfills: false,
+  inject_libraries: false,
 };
+
+// Non-ES2015 stuff applied before closure compiler.
+const babelPlugins = [
+  // These plugins filter out non-ES2015.
+  '@babel/plugin-transform-flow-strip-types',
+  ['@babel/plugin-proposal-class-properties', {loose: true}],
+  'syntax-trailing-function-commas',
+  // These use loose mode which avoids embedding a runtime.
+  // TODO: Remove object spread from the source. Prefer Object.assign instead.
+  [
+    '@babel/plugin-proposal-object-rest-spread',
+    {loose: true, useBuiltIns: true},
+  ],
+  ['@babel/plugin-transform-template-literals', {loose: true}],
+  // TODO: Remove for...of from the source. It requires a runtime to be embedded.
+  '@babel/plugin-transform-for-of',
+  // TODO: Remove array spread from the source. Prefer .apply instead.
+  ['@babel/plugin-transform-spread', {loose: true, useBuiltIns: true}],
+  '@babel/plugin-transform-parameters',
+  // TODO: Remove array destructuring from the source. Requires runtime.
+  ['@babel/plugin-transform-destructuring', {loose: true, useBuiltIns: true}],
+];
+
+const babelToES5Plugins = [
+  // These plugins transform DEV mode. Closure compiler deals with these in PROD.
+  '@babel/plugin-transform-literals',
+  '@babel/plugin-transform-arrow-functions',
+  '@babel/plugin-transform-block-scoped-functions',
+  '@babel/plugin-transform-shorthand-properties',
+  '@babel/plugin-transform-computed-properties',
+  ['@babel/plugin-transform-block-scoping', {throwIfClosureRequired: true}],
+];
 
 function getBabelConfig(
   updateBabelOptions,
@@ -118,11 +154,14 @@ function getBabelConfig(
     packageName === 'react' || externals.indexOf('react') !== -1;
   let options = {
     exclude: '/**/node_modules/**',
+    babelrc: false,
+    configFile: false,
     presets: [],
-    plugins: [],
+    plugins: [...babelPlugins],
   };
   if (isDevelopment) {
     options.plugins.push(
+      ...babelToES5Plugins,
       // Turn console.error/warn() into a custom wrapper
       [
         require('../babel/transform-replace-console-calls'),
@@ -206,6 +245,7 @@ function getFormat(bundleType) {
     case UMD_PROD:
     case UMD_PROFILING:
       return `umd`;
+    case NODE_ES2015:
     case NODE_DEV:
     case NODE_PROD:
     case NODE_PROFILING:
@@ -222,39 +262,9 @@ function getFormat(bundleType) {
   }
 }
 
-function getFilename(name, globalName, bundleType) {
-  // we do this to replace / to -, for react-dom/server
-  name = name.replace('/', '-');
-  switch (bundleType) {
-    case UMD_DEV:
-      return `${name}.development.js`;
-    case UMD_PROD:
-      return `${name}.production.min.js`;
-    case UMD_PROFILING:
-      return `${name}.profiling.min.js`;
-    case NODE_DEV:
-      return `${name}.development.js`;
-    case NODE_PROD:
-      return `${name}.production.min.js`;
-    case NODE_PROFILING:
-      return `${name}.profiling.min.js`;
-    case FB_WWW_DEV:
-    case RN_OSS_DEV:
-    case RN_FB_DEV:
-      return `${globalName}-dev.js`;
-    case FB_WWW_PROD:
-    case RN_OSS_PROD:
-    case RN_FB_PROD:
-      return `${globalName}-prod.js`;
-    case FB_WWW_PROFILING:
-    case RN_FB_PROFILING:
-    case RN_OSS_PROFILING:
-      return `${globalName}-profiling.js`;
-  }
-}
-
 function isProductionBundleType(bundleType) {
   switch (bundleType) {
+    case NODE_ES2015:
     case UMD_DEV:
     case NODE_DEV:
     case FB_WWW_DEV:
@@ -279,6 +289,7 @@ function isProductionBundleType(bundleType) {
 
 function isProfilingBundleType(bundleType) {
   switch (bundleType) {
+    case NODE_ES2015:
     case FB_WWW_DEV:
     case FB_WWW_PROD:
     case NODE_DEV:
@@ -335,7 +346,7 @@ function getPlugins(
     bundleType === UMD_DEV ||
     bundleType === UMD_PROD ||
     bundleType === UMD_PROFILING;
-  const isFBBundle =
+  const isFBWWWBundle =
     bundleType === FB_WWW_DEV ||
     bundleType === FB_WWW_PROD ||
     bundleType === FB_WWW_PROFILING;
@@ -346,7 +357,7 @@ function getPlugins(
     bundleType === RN_FB_DEV ||
     bundleType === RN_FB_PROD ||
     bundleType === RN_FB_PROFILING;
-  const shouldStayReadable = isFBBundle || isRNBundle || forcePrettyOutput;
+  const shouldStayReadable = isFBWWWBundle || isRNBundle || forcePrettyOutput;
   return [
     // Extract error codes from invariant() messages into a file.
     shouldExtractErrors && {
@@ -359,8 +370,6 @@ function getPlugins(
     useForks(forks),
     // Ensure we don't try to bundle any fbjs modules.
     forbidFBJSImports(),
-    // Replace any externals with their valid internal FB mappings
-    isFBBundle && replace(Bundles.fbBundleExternalsMap),
     // Use Node resolution mechanism.
     resolve({
       skip: externals,
@@ -369,7 +378,7 @@ function getPlugins(
     stripBanner({
       exclude: 'node_modules/**/*',
     }),
-    // Compile to ES5.
+    // Compile to ES2015.
     babel(
       getBabelConfig(
         updateBabelOptions,
@@ -522,20 +531,25 @@ async function createBundle(bundle, bundleType) {
     return;
   }
 
-  const filename = getFilename(bundle.entry, bundle.global, bundleType);
+  const filename = getFilename(bundle, bundleType);
   const logKey =
     chalk.white.bold(filename) + chalk.dim(` (${bundleType.toLowerCase()})`);
   const format = getFormat(bundleType);
   const packageName = Packaging.getPackageName(bundle.entry);
 
-  const isFBBundle =
+  const isFBWWWBundle =
     bundleType === FB_WWW_DEV ||
     bundleType === FB_WWW_PROD ||
     bundleType === FB_WWW_PROFILING;
 
+  const isFBRNBundle =
+    bundleType === RN_FB_DEV ||
+    bundleType === RN_FB_PROD ||
+    bundleType === RN_FB_PROFILING;
+
   let resolvedEntry = resolveEntryFork(
     require.resolve(bundle.entry),
-    isFBBundle
+    isFBWWWBundle || isFBRNBundle
   );
 
   const shouldBundleDependencies =
@@ -547,10 +561,6 @@ async function createBundle(bundle, bundleType) {
   if (!shouldBundleDependencies) {
     const deps = Modules.getDependencies(bundleType, bundle.entry);
     externals = externals.concat(deps);
-  }
-  if (isFBBundle) {
-    // Add any mapped fb bundle externals
-    externals = externals.concat(Object.values(Bundles.fbBundleExternalsMap));
   }
 
   const importSideEffects = Modules.getImportSideEffects();
@@ -591,7 +601,7 @@ async function createBundle(bundle, bundleType) {
       esModule: false,
     },
   };
-  const [mainOutputPath, ...otherOutputPaths] = Packaging.getBundleOutputPaths(
+  const mainOutputPath = Packaging.getBundleOutputPath(
     bundleType,
     filename,
     packageName
@@ -613,9 +623,6 @@ async function createBundle(bundle, bundleType) {
           console.log(`${chalk.bgYellow.black(' BUILDING ')} ${logKey}`);
           break;
         case 'BUNDLE_END':
-          for (let i = 0; i < otherOutputPaths.length; i++) {
-            await asyncCopyTo(mainOutputPath, otherOutputPaths[i]);
-          }
           console.log(`${chalk.bgGreen.black(' COMPLETE ')} ${logKey}\n`);
           break;
         case 'ERROR':
@@ -634,9 +641,6 @@ async function createBundle(bundle, bundleType) {
       console.log(`${chalk.bgRed.black(' OH NOES! ')} ${logKey}\n`);
       handleRollupError(error);
       throw error;
-    }
-    for (let i = 0; i < otherOutputPaths.length; i++) {
-      await asyncCopyTo(mainOutputPath, otherOutputPaths[i]);
     }
     console.log(`${chalk.bgGreen.black(' COMPLETE ')} ${logKey}\n`);
   }
@@ -724,6 +728,7 @@ async function buildEverything() {
   // eslint-disable-next-line no-for-of-loops/no-for-of-loops
   for (const bundle of Bundles.bundles) {
     bundles.push(
+      [bundle, NODE_ES2015],
       [bundle, UMD_DEV],
       [bundle, UMD_PROD],
       [bundle, UMD_PROFILING],
@@ -735,17 +740,11 @@ async function buildEverything() {
       [bundle, FB_WWW_PROFILING],
       [bundle, RN_OSS_DEV],
       [bundle, RN_OSS_PROD],
-      [bundle, RN_OSS_PROFILING]
+      [bundle, RN_OSS_PROFILING],
+      [bundle, RN_FB_DEV],
+      [bundle, RN_FB_PROD],
+      [bundle, RN_FB_PROFILING]
     );
-
-    if (__EXPERIMENTAL__) {
-      // FB-specific RN builds are experimental-only.
-      bundles.push(
-        [bundle, RN_FB_DEV],
-        [bundle, RN_FB_PROD],
-        [bundle, RN_FB_PROFILING]
-      );
-    }
   }
 
   if (!shouldExtractErrors && process.env.CIRCLE_NODE_TOTAL) {

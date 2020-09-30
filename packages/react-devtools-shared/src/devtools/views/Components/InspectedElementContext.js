@@ -76,7 +76,7 @@ const resource: Resource<
   InspectedElementFrontend,
 > = createResource(
   (element: Element) => {
-    let request = inProgressRequests.get(element);
+    const request = inProgressRequests.get(element);
     if (request != null) {
       return request.promise;
     }
@@ -188,7 +188,7 @@ function InspectedElementContextController({children}: Props) {
 
               resource.write(element, inspectedElement);
 
-              // Schedule update with React if the curently-selected element has been invalidated.
+              // Schedule update with React if the currently-selected element has been invalidated.
               if (id === selectedElementID) {
                 setCurrentlyInspectedElement(inspectedElement);
               }
@@ -198,7 +198,11 @@ function InspectedElementContextController({children}: Props) {
         case 'full-data':
           const {
             canEditFunctionProps,
+            canEditFunctionPropsDeletePaths,
+            canEditFunctionPropsRenamePaths,
             canEditHooks,
+            canEditHooksAndDeletePaths,
+            canEditHooksAndRenamePaths,
             canToggleSuspense,
             canViewSource,
             hasLegacyContext,
@@ -208,16 +212,28 @@ function InspectedElementContextController({children}: Props) {
             context,
             hooks,
             props,
+            rendererPackageName,
+            rendererVersion,
+            rootType,
             state,
+            key,
           } = ((data.value: any): InspectedElementBackend);
 
           const inspectedElement: InspectedElementFrontend = {
             canEditFunctionProps,
+            canEditFunctionPropsDeletePaths,
+            canEditFunctionPropsRenamePaths,
             canEditHooks,
+            canEditHooksAndDeletePaths,
+            canEditHooksAndRenamePaths,
             canToggleSuspense,
             canViewSource,
             hasLegacyContext,
             id,
+            key,
+            rendererPackageName,
+            rendererVersion,
+            rootType,
             source,
             type,
             owners:
@@ -255,7 +271,7 @@ function InspectedElementContextController({children}: Props) {
             } else {
               resource.write(element, inspectedElement);
 
-              // Schedule update with React if the curently-selected element has been invalidated.
+              // Schedule update with React if the currently-selected element has been invalidated.
               if (id === selectedElementID) {
                 setCurrentlyInspectedElement(inspectedElement);
               }
@@ -351,16 +367,19 @@ function hydrateHelper(
   path?: Array<string | number>,
 ): Object | null {
   if (dehydratedData !== null) {
-    let {cleaned, data, unserializable} = dehydratedData;
+    const {cleaned, data, unserializable} = dehydratedData;
 
     if (path) {
       const {length} = path;
       if (length > 0) {
         // Hydration helper requires full paths, but inspection dehydrates with relative paths.
         // In that event it's important that we adjust the "cleaned" paths to match.
-        cleaned = cleaned.map(cleanedPath => cleanedPath.slice(length));
-        unserializable = unserializable.map(unserializablePath =>
-          unserializablePath.slice(length),
+        return hydrate(
+          data,
+          cleaned.map(cleanedPath => cleanedPath.slice(length)),
+          unserializable.map(unserializablePath =>
+            unserializablePath.slice(length),
+          ),
         );
       }
     }

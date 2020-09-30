@@ -116,6 +116,13 @@ const forks = Object.freeze({
         }
       case 'react-test-renderer':
         switch (bundleType) {
+          case RN_FB_DEV:
+          case RN_FB_PROD:
+          case RN_FB_PROFILING:
+          case RN_OSS_DEV:
+          case RN_OSS_PROD:
+          case RN_OSS_PROFILING:
+            return 'shared/forks/ReactFeatureFlags.test-renderer.native.js';
           case FB_WWW_DEV:
           case FB_WWW_PROD:
           case FB_WWW_PROFILING:
@@ -136,6 +143,10 @@ const forks = Object.freeze({
           case FB_WWW_PROD:
           case FB_WWW_PROFILING:
             return 'shared/forks/ReactFeatureFlags.www.js';
+          case RN_FB_DEV:
+          case RN_FB_PROD:
+          case RN_FB_PROFILING:
+            return 'shared/forks/ReactFeatureFlags.native-fb.js';
         }
     }
     return null;
@@ -273,12 +284,31 @@ const forks = Object.freeze({
         case FB_WWW_PROD:
         case FB_WWW_PROFILING:
           // Use the forked version of the reconciler
-          // TODO: Update this to point to the new module, once it exists
-          return 'react-reconciler/src/ReactFiberReconciler.old.js';
+          return 'react-reconciler/src/ReactFiberReconciler.new.js';
       }
     }
     // Otherwise, use the non-forked version.
     return 'react-reconciler/src/ReactFiberReconciler.old.js';
+  },
+
+  'react-reconciler/src/ReactFiberHotReloading': (
+    bundleType,
+    entry,
+    dependencies,
+    moduleType,
+    bundle
+  ) => {
+    if (bundle.enableNewReconciler) {
+      switch (bundleType) {
+        case FB_WWW_DEV:
+        case FB_WWW_PROD:
+        case FB_WWW_PROFILING:
+          // Use the forked version of the reconciler
+          return 'react-reconciler/src/ReactFiberHotReloading.new.js';
+      }
+    }
+    // Otherwise, use the non-forked version.
+    return 'react-reconciler/src/ReactFiberHotReloading.old.js';
   },
 
   // Different dialogs for caught errors.
@@ -461,14 +491,6 @@ const forks = Object.freeze({
       default:
         return null;
     }
-  },
-
-  // React DOM uses different top level event names and supports mouse events.
-  'legacy-events/ResponderTopLevelEventTypes': (bundleType, entry) => {
-    if (entry === 'react-dom' || entry.startsWith('react-dom/')) {
-      return 'legacy-events/forks/ResponderTopLevelEventTypes.dom.js';
-    }
-    return null;
   },
 });
 

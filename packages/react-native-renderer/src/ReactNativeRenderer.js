@@ -25,19 +25,21 @@ import {
   getPublicRootInstance,
 } from 'react-reconciler/src/ReactFiberReconciler';
 // TODO: direct imports like some-package/src/* are bad. Fix me.
-import {getStackByFiberInDevAndProd} from 'react-reconciler/src/ReactCurrentFiber';
+import {getStackByFiberInDevAndProd} from 'react-reconciler/src/ReactFiberComponentStack';
 import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
 import {
   setBatchingImplementation,
   batchedUpdates,
-} from 'legacy-events/ReactGenericBatching';
+} from './legacy-events/ReactGenericBatching';
 import ReactVersion from 'shared/ReactVersion';
 // Module provided by RN:
 import {UIManager} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
 
 import {getClosestInstanceFromNode} from './ReactNativeComponentTree';
-import {getInspectorDataForViewTag} from './ReactNativeFiberInspector';
-
+import {
+  getInspectorDataForViewTag,
+  getInspectorDataForViewAtPoint,
+} from './ReactNativeFiberInspector';
 import {LegacyRoot} from 'react-reconciler/src/ReactRootTags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import getComponentName from 'shared/getComponentName';
@@ -217,7 +219,7 @@ setBatchingImplementation(
 );
 
 function computeComponentStackForErrorReporting(reactTag: number): string {
-  let fiber = getClosestInstanceFromNode(reactTag);
+  const fiber = getClosestInstanceFromNode(reactTag);
   if (!fiber) {
     return '';
   }
@@ -246,8 +248,14 @@ export {
 
 injectIntoDevTools({
   findFiberByHostInstance: getClosestInstanceFromNode,
-  getInspectorDataForViewTag: getInspectorDataForViewTag,
   bundleType: __DEV__ ? 1 : 0,
   version: ReactVersion,
   rendererPackageName: 'react-native-renderer',
+  rendererConfig: {
+    getInspectorDataForViewTag: getInspectorDataForViewTag,
+    getInspectorDataForViewAtPoint: getInspectorDataForViewAtPoint.bind(
+      null,
+      findNodeHandle,
+    ),
+  },
 });
