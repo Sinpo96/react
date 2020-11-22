@@ -148,6 +148,8 @@ ComponentDummy.prototype = ReactComponent.prototype;
 ReactPureComponent.prototype = new ComponentDummy();
 ReactPureComponent.prototype.constructor = ReactPureComponent;
 // Avoid an extra prototype jump for these methods.
+// object.assign 无法提取 不可枚举 的属性，所以ReactComponent.prototype中的
+// constructor无法被提取，这样就不用担心覆盖ReactPureComponent.prototype中的constructor了
 Object.assign(ReactPureComponent.prototype, ReactComponent.prototype);
 ReactPureComponent.prototype.isPureReactComponent = true;
 
