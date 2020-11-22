@@ -21,7 +21,7 @@ var ReactVersion = require('ReactVersion');
 var findDOMNode = require('findDOMNode');
 var getHostComponentFromComposite = require('getHostComponentFromComposite');
 var renderSubtreeIntoContainer = require('renderSubtreeIntoContainer');
-var warning = require('warning');
+var warning = require('fbjs/lib/warning');
 
 ReactDefaultInjection.inject();
 
@@ -65,7 +65,7 @@ if (
 }
 
 if (__DEV__) {
-  var ExecutionEnvironment = require('ExecutionEnvironment');
+  var ExecutionEnvironment = require('fbjs/lib/ExecutionEnvironment');
   if (ExecutionEnvironment.canUseDOM && window.top === window.self) {
     // First check if devtools is not installed
     if (typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ === 'undefined') {

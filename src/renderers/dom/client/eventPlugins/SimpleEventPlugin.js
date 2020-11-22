@@ -10,7 +10,7 @@
 
 'use strict';
 
-var EventListener = require('EventListener');
+var EventListener = require('fbjs/lib/EventListener');
 var EventPropagators = require('EventPropagators');
 var ReactDOMComponentTree = require('ReactDOMComponentTree');
 var SyntheticAnimationEvent = require('SyntheticAnimationEvent');
@@ -25,9 +25,9 @@ var SyntheticTransitionEvent = require('SyntheticTransitionEvent');
 var SyntheticUIEvent = require('SyntheticUIEvent');
 var SyntheticWheelEvent = require('SyntheticWheelEvent');
 
-var emptyFunction = require('emptyFunction');
+var emptyFunction = require('fbjs/lib/emptyFunction');
 var getEventCharCode = require('getEventCharCode');
-var invariant = require('invariant');
+var invariant = require('fbjs/lib/invariant');
 
 import type {TopLevelTypes} from 'EventConstants';
 import type {

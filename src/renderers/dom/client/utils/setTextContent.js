@@ -9,7 +9,7 @@
 
 'use strict';
 
-var ExecutionEnvironment = require('ExecutionEnvironment');
+var ExecutionEnvironment = require('fbjs/lib/ExecutionEnvironment');
 var escapeTextContentForBrowser = require('escapeTextContentForBrowser');
 var setInnerHTML = require('setInnerHTML');
 

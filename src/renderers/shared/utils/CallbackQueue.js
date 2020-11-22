@@ -12,7 +12,7 @@
 
 var PooledClass = require('PooledClass');
 
-var invariant = require('invariant');
+var invariant = require('fbjs/lib/invariant');
 
 /**
  * A specialized pseudo-event module to help keep track of components waiting to

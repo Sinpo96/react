@@ -16,9 +16,9 @@ var ReactReconciler = require('ReactReconciler');
 var ReactReconcileTransaction = require('ReactReconcileTransaction');
 var ReactUpdates = require('ReactUpdates');
 
-var emptyObject = require('emptyObject');
+var emptyObject = require('fbjs/lib/emptyObject');
 var getNextDebugID = require('getNextDebugID');
-var invariant = require('invariant');
+var invariant = require('fbjs/lib/invariant');
 
 function injectDefaults() {
   ReactUpdates.injection.injectReconcileTransaction(ReactReconcileTransaction);

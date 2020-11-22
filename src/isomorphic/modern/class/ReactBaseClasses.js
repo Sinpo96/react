@@ -12,8 +12,8 @@
 var ReactNoopUpdateQueue = require('ReactNoopUpdateQueue');
 
 var canDefineProperty = require('canDefineProperty');
-var emptyObject = require('emptyObject');
-var invariant = require('invariant');
+var emptyObject = require('fbjs/lib/emptyObject');
+var invariant = require('fbjs/lib/invariant');
 var lowPriorityWarning = require('lowPriorityWarning');
 
 /**

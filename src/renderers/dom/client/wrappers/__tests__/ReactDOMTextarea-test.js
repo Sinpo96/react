@@ -9,7 +9,7 @@
 
 'use strict';
 
-var emptyFunction = require('emptyFunction');
+var emptyFunction = require('fbjs/lib/emptyFunction');
 
 describe('ReactDOMTextarea', () => {
   var React;

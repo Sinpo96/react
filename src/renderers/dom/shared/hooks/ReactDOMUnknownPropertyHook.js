@@ -13,7 +13,7 @@ var DOMProperty = require('DOMProperty');
 var EventPluginRegistry = require('EventPluginRegistry');
 var ReactComponentTreeHook = require('ReactComponentTreeHook');
 
-var warning = require('warning');
+var warning = require('fbjs/lib/warning');
 
 if (__DEV__) {
   var reactProps = {

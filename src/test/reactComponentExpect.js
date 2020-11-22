@@ -12,7 +12,7 @@
 var ReactInstanceMap = require('ReactInstanceMap');
 var ReactTestUtils = require('ReactTestUtils');
 
-var invariant = require('invariant');
+var invariant = require('fbjs/lib/invariant');
 
 function reactComponentExpect(instance) {
   if (instance instanceof reactComponentExpectInternal) {

@@ -22,11 +22,11 @@ if (__DEV__) {
   var checkReactTypeSpec = require('checkReactTypeSpec');
 }
 
-var emptyObject = require('emptyObject');
-var invariant = require('invariant');
-var shallowEqual = require('shallowEqual');
+var emptyObject = require('fbjs/lib/emptyObject');
+var invariant = require('fbjs/lib/invariant');
+var shallowEqual = require('fbjs/lib/shallowEqual');
 var shouldUpdateReactComponent = require('shouldUpdateReactComponent');
-var warning = require('warning');
+var warning = require('fbjs/lib/warning');
 
 import type {ReactPropTypeLocations} from 'ReactPropTypeLocations';
 

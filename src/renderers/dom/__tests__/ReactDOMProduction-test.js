@@ -30,7 +30,7 @@ describe('ReactDOMProduction', () => {
   });
 
   it('should use prod fbjs', () => {
-    var warning = require('warning');
+    var warning = require('fbjs/lib/warning');
 
     spyOn(console, 'error');
     warning(false, 'Do cows go moo?');

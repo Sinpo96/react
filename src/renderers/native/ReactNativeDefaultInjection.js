@@ -37,7 +37,7 @@ var ReactSimpleEmptyComponent = require('ReactSimpleEmptyComponent');
 var ReactUpdates = require('ReactUpdates');
 var ResponderEventPlugin = require('ResponderEventPlugin');
 
-var invariant = require('invariant');
+var invariant = require('fbjs/lib/invariant');
 
 function inject() {
   /**

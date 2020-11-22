@@ -11,7 +11,7 @@
 
 var ReactComponentTreeHook = require('ReactComponentTreeHook');
 
-var warning = require('warning');
+var warning = require('fbjs/lib/warning');
 
 var didWarnValueNull = false;
 

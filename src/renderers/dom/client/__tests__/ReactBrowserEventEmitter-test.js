@@ -56,7 +56,7 @@ describe('ReactBrowserEventEmitter', () => {
   beforeEach(() => {
     jest.resetModuleRegistry();
     LISTENER.mockClear();
-    EventListener = require('EventListener');
+    EventListener = require('fbjs/lib/EventListener');
     EventPluginHub = require('EventPluginHub');
     EventPluginRegistry = require('EventPluginRegistry');
     React = require('React');

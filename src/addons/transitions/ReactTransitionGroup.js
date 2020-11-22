@@ -15,7 +15,7 @@ var ReactTransitionChildMapping = require('ReactTransitionChildMapping');
 var propTypesFactory = require('prop-types/factory');
 var PropTypes = propTypesFactory(React.isValidElement);
 
-var emptyFunction = require('emptyFunction');
+var emptyFunction = require('fbjs/lib/emptyFunction');
 
 /**
  * A basis for animations. When children are declaratively added or removed,

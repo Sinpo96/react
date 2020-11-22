@@ -12,8 +12,8 @@
 var ReactPropTypeLocationNames = require('ReactPropTypeLocationNames');
 var ReactPropTypesSecret = require('ReactPropTypesSecret');
 
-var invariant = require('invariant');
-var warning = require('warning');
+var invariant = require('fbjs/lib/invariant');
+var warning = require('fbjs/lib/warning');
 
 import type {ReactPropTypeLocations} from 'ReactPropTypeLocations';
 

@@ -9,14 +9,14 @@
 
 'use strict';
 
-var EventListener = require('EventListener');
-var ExecutionEnvironment = require('ExecutionEnvironment');
+var EventListener = require('fbjs/lib/EventListener');
+var ExecutionEnvironment = require('fbjs/lib/ExecutionEnvironment');
 var PooledClass = require('PooledClass');
 var ReactDOMComponentTree = require('ReactDOMComponentTree');
 var ReactUpdates = require('ReactUpdates');
 
 var getEventTarget = require('getEventTarget');
-var getUnboundedScrollPosition = require('getUnboundedScrollPosition');
+var getUnboundedScrollPosition = require('fbjs/lib/getUnboundedScrollPosition');
 
 /**
  * Find the deepest React component completely containing the root of the

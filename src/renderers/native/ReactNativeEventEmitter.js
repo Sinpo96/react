@@ -16,7 +16,7 @@ var ReactNativeComponentTree = require('ReactNativeComponentTree');
 var ReactNativeTagHandles = require('ReactNativeTagHandles');
 var ReactUpdates = require('ReactUpdates');
 
-var warning = require('warning');
+var warning = require('fbjs/lib/warning');
 
 /**
  * Version of `ReactBrowserEventEmitter` that works on the receiving side of a

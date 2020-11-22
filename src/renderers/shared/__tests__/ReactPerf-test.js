@@ -36,7 +36,7 @@ describe('ReactPerf', () => {
     ReactDOM = require('ReactDOM');
     ReactPerf = require('ReactPerf');
     ReactTestUtils = require('ReactTestUtils');
-    emptyFunction = require('emptyFunction');
+    emptyFunction = require('fbjs/lib/emptyFunction');
 
     App = class extends React.Component {
       render() {

@@ -29,7 +29,7 @@ describe('ReactServerRendering', () => {
     ReactTestUtils = require('ReactTestUtils');
     ReactReconcileTransaction = require('ReactReconcileTransaction');
 
-    ExecutionEnvironment = require('ExecutionEnvironment');
+    ExecutionEnvironment = require('fbjs/lib/ExecutionEnvironment');
     ExecutionEnvironment.canUseDOM = false;
     ReactServerRendering = require('ReactServerRendering');
 

@@ -10,7 +10,7 @@
 'use strict';
 
 var CSSProperty = require('CSSProperty');
-var warning = require('warning');
+var warning = require('fbjs/lib/warning');
 
 var isUnitlessNumber = CSSProperty.isUnitlessNumber;
 var styleWarnings = {};

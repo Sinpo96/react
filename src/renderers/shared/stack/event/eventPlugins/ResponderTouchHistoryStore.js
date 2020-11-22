@@ -12,8 +12,8 @@
 
 const EventPluginUtils = require('EventPluginUtils');
 
-const invariant = require('invariant');
-const warning = require('warning');
+const invariant = require('fbjs/lib/invariant');
+const warning = require('fbjs/lib/warning');
 
 const {isEndish, isMoveish, isStartish} = EventPluginUtils;
 

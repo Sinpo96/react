@@ -15,7 +15,7 @@ var ReactErrorUtils = require('ReactErrorUtils');
 
 var accumulateInto = require('accumulateInto');
 var forEachAccumulated = require('forEachAccumulated');
-var invariant = require('invariant');
+var invariant = require('fbjs/lib/invariant');
 
 /**
  * Internal store for event listeners

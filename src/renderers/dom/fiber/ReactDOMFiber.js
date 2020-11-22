@@ -14,7 +14,7 @@ import type {HostChildren} from 'ReactFiberReconciler';
 
 var ReactFiberReconciler = require('ReactFiberReconciler');
 
-var warning = require('warning');
+var warning = require('fbjs/lib/warning');
 
 type DOMContainerElement = Element & {_reactRootContainer: ?Object};
 
